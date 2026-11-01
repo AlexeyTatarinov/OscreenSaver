@@ -25,8 +25,9 @@ const wchar_t kOverlayClass[] = L"OscreenSaver.Overlay";
 const COLORREF kAccent = RGB(0, 120, 215);
 const COLORREF kLabelBack = RGB(32, 32, 32);
 const COLORREF kLabelText = RGB(255, 255, 255);
+constexpr float kPanelSize = 0.8f;  // panel buttons are 80% of their original size
 
-// Handles around the selection: 0..7 clockwise from top-left. 8 = inside. -1 = outside.
+// Handles around a frame: 0..7 clockwise from top-left. 8 = inside. -1 = outside.
 enum Hit { TopLeft, Top, TopRight, Right, BottomRight, Bottom, BottomLeft, Left, Inside, Outside = -1 };
 enum class Drag { None, Create, Move, Resize };
 
@@ -37,8 +38,9 @@ struct Settings {
     bool hasCustom = false;
     COLORREF customColors[16] = {};  // the colour window's own "custom colours" row
     int size = 1;
-    TextStyle text;              // px stored at 100% screen scale
-    int textSize = 1;            // highlighted text size button, -1 = size from the font window
+    TextStyle text;  // px stored at 100% screen scale
+    int textSize = 1;
+    bool eraseParts = false;
 };
 Settings g_settings;
 bool g_dialogOpen = false;  // colour or font window is open: Esc/Enter belong to it
@@ -50,7 +52,7 @@ struct Overlay {
     bool picking = false;  // monitor picker mode: right-click chooses this monitor
 
     bool hasSelection = false;
-    RECT selection = {};  // normalized, in window pixels (= snapshot pixels)
+    RECT selection = {};  // the screenshot area, in window pixels (= snapshot pixels)
     bool firstSelectionDone = false;
 
     // Area mode dragging.
@@ -66,11 +68,12 @@ struct Overlay {
     int colorIndex = kDefaultColor;
     COLORREF color = kPalette[kDefaultColor];
     int size = 1;
-    TextStyle textStyle;
+    TextStyle textStyle;  // look of the next letters typed
     int textSize = 1;
+    bool eraseParts = false;
 
     // Drawn objects and history. Every change saves the previous list, so undo and redo
-    // work the same way for drawing, erasing and text edits.
+    // work the same way for drawing, erasing, moving and text edits.
     std::vector<Shape> shapes;
     std::vector<std::vector<Shape>> undo;
     std::vector<std::vector<Shape>> redo;
@@ -81,10 +84,19 @@ struct Overlay {
     bool erasing = false;
     bool erasedSomething = false;
     std::vector<Shape> beforeErase;
+    std::vector<char> touched;  // partial eraser: objects already cut in this stroke
+    Pt lastErase = {};
 
-    bool typing = false;          // a text is being typed
-    bool editingExisting = false; // ...and it is an old text opened again
-    Shape text;
+    int typing = -1;             // index of the text being typed, -1 = none
+    bool typingChanged = false;
+
+    int picked = -1;             // object chosen with the selection tool, -1 = none
+    Drag pickDrag = Drag::None;
+    int pickHandle = Outside;
+    Shape pickOriginal;
+    RECT pickBox = {};
+    bool pickChanged = false;
+    bool pickCheckpoint = false;
 
     POINT mouse = {-10000, -10000};
     int hover = toolbar::kNone;
@@ -100,6 +112,7 @@ struct Overlay {
     HGDIOBJ dimOld = nullptr;
     HFONT font = nullptr;
     float scale = 1.f;
+    float panelScale = 1.f;
     int unit = 1;  // whole-pixel size of one "point" of decoration
 };
 
@@ -148,18 +161,29 @@ POINT HandleCenter(const RECT& r, int handle) {
     }
 }
 
-int HitTest(const Overlay& o, POINT p) {
-    if (!o.hasSelection) {
-        return Outside;
-    }
+int FrameHit(const Overlay& o, const RECT& frame, POINT p) {
     const int grab = Scaled(o, 6);
     for (int h = TopLeft; h <= Left; ++h) {
-        const POINT c = HandleCenter(o.selection, h);
+        const POINT c = HandleCenter(frame, h);
         if (std::abs(p.x - c.x) <= grab && std::abs(p.y - c.y) <= grab) {
             return h;
         }
     }
-    return PtInRect(&o.selection, p) ? Inside : Outside;
+    return PtInRect(&frame, p) ? Inside : Outside;
+}
+
+int HitTest(const Overlay& o, POINT p) {
+    return o.hasSelection ? FrameHit(o, o.selection, p) : Outside;
+}
+
+// Moves the edges grabbed by a handle.
+RECT ResizeByHandle(const RECT& r0, int handle, LONG dx, LONG dy) {
+    LONG l = r0.left, t = r0.top, r = r0.right, b = r0.bottom;
+    if (handle == TopLeft || handle == Left || handle == BottomLeft) l += dx;
+    if (handle == TopRight || handle == Right || handle == BottomRight) r += dx;
+    if (handle == TopLeft || handle == Top || handle == TopRight) t += dy;
+    if (handle == BottomLeft || handle == Bottom || handle == BottomRight) b += dy;
+    return Normalize(l, t, r, b);
 }
 
 // A dark box with white text. The same function gives the box for drawing and for repainting,
@@ -206,11 +230,11 @@ toolbar::State PanelState(const Overlay& o) {
     st.customColor = g_settings.customColor;
     st.hasCustom = g_settings.hasCustom;
     st.size = o.tool == Tool::Text ? o.textSize : o.size;
-    const TextStyle& ts = o.typing ? o.text.style : o.textStyle;
-    st.bold = ts.bold;
-    st.italic = ts.italic;
-    st.strike = ts.strike;
-    st.canUndo = !o.undo.empty() || (o.typing && !o.text.text.empty());
+    st.bold = o.textStyle.bold;
+    st.italic = o.textStyle.italic;
+    st.strike = o.textStyle.strike;
+    st.eraseParts = o.eraseParts;
+    st.canUndo = !o.undo.empty();
     st.canRedo = !o.redo.empty();
     st.hover = o.hover;
     st.dark = o.dark;
@@ -220,18 +244,18 @@ toolbar::State PanelState(const Overlay& o) {
 bool PanelVisible(const Overlay& o) { return o.hasSelection && !o.picking; }
 
 RECT PanelRect(const Overlay& o) {
-    return toolbar::Place(o.selection, ClientRect(o), o.scale, PanelState(o));
+    return toolbar::Place(o.selection, ClientRect(o), o.panelScale, PanelState(o));
 }
 
 int PanelHit(const Overlay& o, POINT p) {
     if (!PanelVisible(o)) return toolbar::kNone;
-    return toolbar::HitTest(PanelRect(o), p, o.scale, PanelState(o));
+    return toolbar::HitTest(PanelRect(o), p, o.panelScale, PanelState(o));
 }
 
 RECT TipBox(const Overlay& o) {
     if (o.hover == toolbar::kNone || !PanelVisible(o)) return RECT{0, 0, 0, 0};
     const RECT panel = PanelRect(o);
-    const RECT button = toolbar::ButtonRect(panel, o.hover, o.scale, PanelState(o));
+    const RECT button = toolbar::ButtonRect(panel, o.hover, o.panelScale, PanelState(o));
     RECT box = TextBox(o, toolbar::Tip(o.hover), button, true);
     const int h = box.bottom - box.top;
     const int gap = Scaled(o, 4);
@@ -256,7 +280,23 @@ RECT EraserCircleRect(const Overlay& o) {
     return RECT{o.mouse.x - r, o.mouse.y - r, o.mouse.x + r + 1, o.mouse.y + r + 1};
 }
 
-// Everything outside the picture itself: frame, handles, size label, panel, hint, eraser circle.
+// Frame around the object chosen with the selection tool.
+RECT PickFrame(const Overlay& o) {
+    if (o.picked < 0 || o.picked >= static_cast<int>(o.shapes.size())) return RECT{0, 0, 0, 0};
+    RECT r = ShapeBox(o.shapes[o.picked], o.scale);
+    const int pad = Scaled(o, 5);
+    InflateRect(&r, pad, pad);
+    return r;
+}
+
+RECT PickFrameArea(const Overlay& o) {
+    RECT r = PickFrame(o);
+    if (IsRectEmpty(&r)) return r;
+    InflateRect(&r, Scaled(o, 6), Scaled(o, 6));
+    return r;
+}
+
+// Everything outside the picture itself: frames, handles, size label, panel, hints, eraser circle.
 RECT ChromeRect(const Overlay& o) {
     if (o.picking) return RECT{0, 0, 0, 0};
     if (!o.hasSelection) return TextBox(o, T(Str::HintSelect), HintAnchor(o), true);
@@ -266,6 +306,7 @@ RECT ChromeRect(const Overlay& o) {
     r = Union(r, PanelRect(o));
     r = Union(r, TipBox(o));
     r = Union(r, EraserCircleRect(o));
+    r = Union(r, PickFrameArea(o));
     return r;
 }
 
@@ -289,7 +330,7 @@ void InvalidatePicture(Overlay& o) {
     if (o.hasSelection) InvalidateRect(o.hwnd, &o.selection, FALSE);
 }
 
-// ---------- Selection ----------
+// ---------- Selection of the screenshot area ----------
 
 void SetSelection(Overlay& o, const RECT& r) {
     ChromeChange change(o);
@@ -309,95 +350,156 @@ void Checkpoint(Overlay& o) {
     o.redo.clear();
 }
 
+void Unpick(Overlay& o) {
+    if (o.picked < 0) return;
+    ChromeChange change(o);
+    o.picked = -1;
+    o.pickDrag = Drag::None;
+}
+
 // ---------- Text ----------
 
 std::vector<const Shape*> VisibleShapes(const Overlay& o) {
     std::vector<const Shape*> list;
-    list.reserve(o.shapes.size() + 2);
+    list.reserve(o.shapes.size() + 1);
     for (const Shape& s : o.shapes) list.push_back(&s);
     if (o.drawing) list.push_back(&o.current);
-    if (o.typing) list.push_back(&o.text);  // last, so the cursor is drawn for it
     return list;
 }
 
+Caret CurrentCaret(const Overlay& o) {
+    Caret c;
+    if (o.typing >= 0) {
+        c.shape = &o.shapes[o.typing];
+        c.style = o.textStyle;
+        c.color = o.color;
+    }
+    return c;
+}
+
+void InvalidateTyping(Overlay& o) {
+    if (o.typing < 0) return;
+    Shape probe = o.shapes[o.typing];
+    probe.runs.push_back(TextRun{L"W", o.textStyle, o.color});  // room for the cursor in the next look
+    InvalidateShape(o, probe);
+}
+
+// Ends typing. Empty texts disappear; nothing typed means nothing to undo.
 void CommitText(Overlay& o) {
-    if (!o.typing) return;
+    if (o.typing < 0) return;
     ChromeChange change(o);
-    InvalidateShape(o, o.text);
-    o.typing = false;
-    if (o.text.text.empty()) {
-        return;  // an old text emptied is simply deleted; undo brings it back
+    InvalidateTyping(o);
+    Shape& s = o.shapes[o.typing];
+    const bool empty = std::all_of(s.runs.begin(), s.runs.end(), [](const TextRun& r) { return r.text.empty(); });
+    if (empty) {
+        if (o.picked == o.typing) o.picked = -1;
+        else if (o.picked > o.typing) --o.picked;
+        o.shapes.erase(o.shapes.begin() + o.typing);
     }
-    if (!o.editingExisting) Checkpoint(o);  // an old text was saved for undo when it was opened
-    o.shapes.push_back(o.text);
+    if (!o.typingChanged && !o.undo.empty()) {
+        o.undo.pop_back();  // the text was only opened, not changed
+    }
+    o.typing = -1;
 }
 
+// Esc while typing: the text returns to how it was before.
 void CancelText(Overlay& o) {
-    if (!o.typing) return;
+    if (o.typing < 0) return;
     ChromeChange change(o);
-    InvalidateShape(o, o.text);
-    o.typing = false;
-    if (o.editingExisting && !o.undo.empty()) {
-        o.shapes = o.undo.back();  // put the old text back unchanged
+    InvalidateTyping(o);
+    o.typing = -1;
+    o.picked = -1;
+    if (!o.undo.empty()) {
+        o.shapes = o.undo.back();
         o.undo.pop_back();
-        InvalidatePicture(o);
     }
+    InvalidatePicture(o);
 }
 
-// Shows the style of the text being typed on the panel buttons.
-void TakeStyleFrom(Overlay& o, const Shape& s) {
-    o.textStyle = s.style;
+// Shows the look of the end of a text on the panel, so typing continues in the same look.
+void TakeLookFrom(Overlay& o, const TextStyle& style, COLORREF color) {
+    o.textStyle = style;
     o.textSize = -1;
     for (int i = 0; i < kSizeCount; ++i) {
-        if (std::fabs(TextPresetPx(i, o.scale) - s.style.px) < 0.5f) o.textSize = i;
+        if (std::fabs(TextPresetPx(i, o.scale) - style.px) < 0.5f) o.textSize = i;
     }
-    o.color = s.color;
+    o.color = color;
     o.colorIndex = kColorCount;
     for (int i = 0; i < kColorCount; ++i) {
-        if (kPalette[i] == s.color) o.colorIndex = i;
+        if (kPalette[i] == color) o.colorIndex = i;
     }
     if (o.colorIndex == kColorCount) {
-        g_settings.customColor = s.color;
+        g_settings.customColor = color;
         g_settings.hasCustom = true;
     }
 }
 
-void StartText(Overlay& o, POINT p) {
-    CommitText(o);
+void BeginTyping(Overlay& o, int index) {
     ChromeChange change(o);
-    // Clicking an existing text opens it again for typing and formatting.
-    for (size_t i = o.shapes.size(); i-- > 0;) {
-        if (TextContains(o.shapes[i], p, o.scale)) {
-            Checkpoint(o);
-            o.text = o.shapes[i];
-            o.shapes.erase(o.shapes.begin() + static_cast<std::ptrdiff_t>(i));
-            o.typing = true;
-            o.editingExisting = true;
-            TakeStyleFrom(o, o.text);
-            InvalidateShape(o, o.text);
-            return;
-        }
-    }
-    o.typing = true;
-    o.editingExisting = false;
-    o.text = Shape{Tool::Text, o.color, o.size, {p}, L"", o.textStyle};
-    InvalidateShape(o, o.text);
+    o.typing = index;
+    o.typingChanged = false;
+    const Shape& s = o.shapes[index];
+    if (!s.runs.empty()) TakeLookFrom(o, s.runs.back().style, s.runs.back().color);
+    InvalidateTyping(o);
 }
 
-// Applies a change of style to the text being typed (and to texts typed later).
+int TextAt(const Overlay& o, POINT p) {
+    for (int i = static_cast<int>(o.shapes.size()); i-- > 0;) {
+        if (o.shapes[i].tool == Tool::Text && ShapeHit(o.shapes[i], ToPt(p), o.scale)) return i;
+    }
+    return -1;
+}
+
+// Text tool click: open the text under the mouse, or start a new one.
+void StartText(Overlay& o, POINT p) {
+    CommitText(o);
+    const int existing = TextAt(o, p);
+    Checkpoint(o);
+    if (existing >= 0) {
+        BeginTyping(o, existing);
+        return;
+    }
+    Shape s;
+    s.tool = Tool::Text;
+    s.color = o.color;
+    s.points = {ToPt(p)};
+    o.shapes.push_back(s);
+    BeginTyping(o, static_cast<int>(o.shapes.size()) - 1);
+}
+
+void TypeChar(Overlay& o, wchar_t ch) {
+    if (o.typing < 0) return;
+    ChromeChange change(o);
+    InvalidateTyping(o);
+    Shape& s = o.shapes[o.typing];
+    if (ch == L'\b') {
+        while (!s.runs.empty() && s.runs.back().text.empty()) s.runs.pop_back();
+        if (!s.runs.empty()) {
+            s.runs.back().text.pop_back();
+            if (s.runs.back().text.empty()) s.runs.pop_back();
+        }
+    } else {
+        // New letters take the look chosen now; letters typed before keep theirs.
+        if (s.runs.empty() || s.runs.back().style != o.textStyle || s.runs.back().color != o.color) {
+            s.runs.push_back(TextRun{L"", o.textStyle, o.color});
+        }
+        s.runs.back().text.push_back(ch);
+    }
+    o.typingChanged = true;
+    InvalidateTyping(o);
+}
+
+// Changes the look of the next letters only.
 template <typename Change>
 void ChangeTextStyle(Overlay& o, Change change) {
     ChromeChange chrome(o);
+    InvalidateTyping(o);
     change(o.textStyle);
-    if (o.typing) {
-        InvalidateShape(o, o.text);
-        change(o.text.style);
-        InvalidateShape(o, o.text);
-    }
+    InvalidateTyping(o);
 }
 
 void OpenFontWindow(Overlay& o) {
-    const TextStyle& st = o.typing ? o.text.style : o.textStyle;
+    const TextStyle& st = o.textStyle;
     LOGFONTW lf = {};
     lf.lfHeight = -static_cast<LONG>(std::lround(st.px));
     lf.lfWeight = st.bold ? FW_BOLD : FW_NORMAL;
@@ -410,11 +512,11 @@ void OpenFontWindow(Overlay& o) {
     CHOOSEFONTW cf = {sizeof(cf)};
     cf.hwndOwner = o.hwnd;
     cf.lpLogFont = &lf;
-    cf.rgbColors = o.typing ? o.text.color : o.color;
+    cf.rgbColors = o.color;
     // Only TrueType/OpenType fonts: those can be drawn smoothly at any size.
     cf.Flags = CF_SCREENFONTS | CF_EFFECTS | CF_INITTOLOGFONTSTRUCT | CF_TTONLY | CF_NOVERTFONTS |
                CF_FORCEFONTEXIST | CF_LIMITSIZE;
-    cf.nSizeMin = 6;    // points
+    cf.nSizeMin = 6;  // points
     cf.nSizeMax = 200;
     g_dialogOpen = true;
     const BOOL ok = ChooseFontW(&cf);
@@ -422,31 +524,26 @@ void OpenFontWindow(Overlay& o) {
     SetFocus(o.hwnd);
     if (!ok) return;
 
-    ChangeTextStyle(o, [&](TextStyle& t) {
-        t.font = lf.lfFaceName;
-        t.px = std::clamp(static_cast<float>(std::abs(lf.lfHeight)), 6.f, 300.f * o.scale);
-        t.bold = lf.lfWeight >= FW_SEMIBOLD;
-        t.italic = lf.lfItalic != 0;
-        t.strike = lf.lfStrikeOut != 0;
-        t.underline = lf.lfUnderline != 0;
-    });
-    Shape probe;
-    probe.style = o.textStyle;
-    probe.color = cf.rgbColors;
     ChromeChange chrome(o);
-    TakeStyleFrom(o, probe);
-    if (o.typing) {
-        o.text.color = cf.rgbColors;
-        InvalidateShape(o, o.text);
-    }
+    InvalidateTyping(o);
+    TextStyle t;
+    t.font = lf.lfFaceName;
+    t.px = std::clamp(static_cast<float>(std::abs(lf.lfHeight)), 6.f, 300.f * o.scale);
+    t.bold = lf.lfWeight >= FW_SEMIBOLD;
+    t.italic = lf.lfItalic != 0;
+    t.strike = lf.lfStrikeOut != 0;
+    t.underline = lf.lfUnderline != 0;
+    TakeLookFrom(o, t, cf.rgbColors);
+    InvalidateTyping(o);
 }
 
 // ---------- Tools and options ----------
 
 void SelectTool(Overlay& o, Tool t) {
-    if (t != Tool::Text) CommitText(o);
+    if (t != Tool::Text && t != Tool::Select) CommitText(o);
     if (t != Tool::Area && !o.hasSelection) return;
     ChromeChange change(o);
+    if (t != Tool::Select) o.picked = -1;
     o.tool = t;
     if (t != Tool::Area) o.lastDrawTool = t;
 }
@@ -457,12 +554,9 @@ void ToggleAreaMode(Overlay& o) {
 
 void SetColorValue(Overlay& o, int index, COLORREF value) {
     ChromeChange change(o);
+    InvalidateTyping(o);
     o.colorIndex = index;
     o.color = value;
-    if (o.typing) {
-        o.text.color = value;
-        InvalidateShape(o, o.text);
-    }
 }
 
 void OpenColorWindow(Overlay& o) {
@@ -494,10 +588,16 @@ void SetSize(Overlay& o, int s) {
     o.size = s;
 }
 
+void SetEraseParts(Overlay& o, bool parts) {
+    ChromeChange change(o);
+    o.eraseParts = parts;
+}
+
 void Undo(Overlay& o) {
     CommitText(o);
     if (o.undo.empty()) return;
     ChromeChange change(o);
+    o.picked = -1;
     o.redo.push_back(o.shapes);
     o.shapes = o.undo.back();
     o.undo.pop_back();
@@ -508,37 +608,53 @@ void Redo(Overlay& o) {
     CommitText(o);
     if (o.redo.empty()) return;
     ChromeChange change(o);
+    o.picked = -1;
     o.undo.push_back(o.shapes);
     o.shapes = o.redo.back();
     o.redo.pop_back();
     InvalidatePicture(o);
 }
 
-// ---------- Drawing lines and figures ----------
+void DeletePicked(Overlay& o) {
+    if (o.picked < 0 || o.typing >= 0) return;
+    ChromeChange change(o);
+    Checkpoint(o);
+    InvalidateShape(o, o.shapes[o.picked]);
+    o.shapes.erase(o.shapes.begin() + o.picked);
+    o.picked = -1;
+}
 
-bool IsTwoPointTool(Tool t) { return t == Tool::Arrow || t == Tool::Rect || t == Tool::Ellipse; }
+// ---------- Drawing lines and figures ----------
 
 void StartStroke(Overlay& o, POINT p) {
     o.drawing = true;
-    o.current = Shape{o.tool, o.color, o.size, {p}, L"", {}};
-    if (IsTwoPointTool(o.tool)) o.current.points.push_back(p);
+    o.current = Shape{};
+    o.current.tool = o.tool;
+    o.current.color = o.color;
+    o.current.size = o.size;
+    o.current.points = {ToPt(p)};
+    if (IsTwoPointTool(o.tool)) o.current.points.push_back(ToPt(p));
     SetCapture(o.hwnd);
     InvalidateShape(o, o.current);
 }
 
 void ContinueStroke(Overlay& o, POINT p) {
-    std::vector<POINT>& pts = o.current.points;
+    std::vector<Pt>& pts = o.current.points;
     if (IsTwoPointTool(o.current.tool)) {
         const RECT before = ShapeBounds(o.current, o.scale);
-        pts[1] = p;
+        pts[1] = ToPt(p);
         const RECT dirty = Union(before, ShapeBounds(o.current, o.scale));
         InvalidateRect(o.hwnd, &dirty, FALSE);
         return;
     }
-    if (pts.back().x == p.x && pts.back().y == p.y) return;
+    const Pt np = ToPt(p);
+    if (pts.back().x == np.x && pts.back().y == np.y) return;
     // Repaint only the newest piece of the line.
-    Shape piece{o.current.tool, 0, o.current.size, {pts.back(), p}, L"", {}};
-    pts.push_back(p);
+    Shape piece;
+    piece.tool = o.current.tool;
+    piece.size = o.current.size;
+    piece.points = {pts.back(), np};
+    pts.push_back(np);
     InvalidateShape(o, piece);
 }
 
@@ -551,23 +667,55 @@ void EndStroke(Overlay& o) {
     if (GetCapture() == o.hwnd) ReleaseCapture();
 }
 
-// ---------- Eraser: removes whole drawn objects, text included ----------
+// ---------- Eraser ----------
+// Whole mode removes every object the eraser touches. Part mode rubs out only what is under the
+// eraser, like in Paint; the rubbed-out part is kept with the object, so it moves and scales with it.
 
-void EraseAt(Overlay& o, POINT p) {
+void InvalidateAround(Overlay& o, Pt a, Pt b, float r) {
+    RECT dirty = {static_cast<LONG>(std::min(a.x, b.x) - r - 2), static_cast<LONG>(std::min(a.y, b.y) - r - 2),
+                  static_cast<LONG>(std::max(a.x, b.x) + r + 3), static_cast<LONG>(std::max(a.y, b.y) + r + 3)};
+    InvalidateRect(o.hwnd, &dirty, FALSE);
+}
+
+void EraseAt(Overlay& o, POINT pos) {
+    const Pt p = ToPt(pos);
     const float r = EraserRadius(o.size, o.scale);
-    for (size_t i = o.shapes.size(); i-- > 0;) {
-        if (ShapeTouched(o.shapes[i], p, r, o.scale)) {
-            InvalidateShape(o, o.shapes[i]);
-            o.shapes.erase(o.shapes.begin() + static_cast<std::ptrdiff_t>(i));
-            o.erasedSomething = true;
+    if (!o.eraseParts) {
+        for (size_t i = o.shapes.size(); i-- > 0;) {
+            if (ShapeTouched(o.shapes[i], p, r, o.scale)) {
+                InvalidateShape(o, o.shapes[i]);
+                o.shapes.erase(o.shapes.begin() + static_cast<std::ptrdiff_t>(i));
+                o.erasedSomething = true;
+            }
         }
+        return;
     }
+    const Pt from = o.lastErase;
+    const RECT reach = {static_cast<LONG>(std::min(from.x, p.x) - r), static_cast<LONG>(std::min(from.y, p.y) - r),
+                        static_cast<LONG>(std::max(from.x, p.x) + r + 1),
+                        static_cast<LONG>(std::max(from.y, p.y) + r + 1)};
+    for (size_t i = 0; i < o.shapes.size(); ++i) {
+        const RECT bounds = ShapeBounds(o.shapes[i], o.scale);
+        RECT common;
+        if (!IntersectRect(&common, &bounds, &reach)) continue;
+        Shape& s = o.shapes[i];
+        if (!o.touched[i]) {
+            o.touched[i] = 1;
+            s.erasures.push_back(Erasure{{from}, 2 * r});
+        }
+        s.erasures.back().points.push_back(p);
+        o.erasedSomething = true;
+    }
+    InvalidateAround(o, from, p, r);
+    o.lastErase = p;
 }
 
 void StartErase(Overlay& o, POINT p) {
     o.erasing = true;
     o.erasedSomething = false;
     o.beforeErase = o.shapes;
+    o.touched.assign(o.shapes.size(), 0);
+    o.lastErase = ToPt(p);
     SetCapture(o.hwnd);
     EraseAt(o, p);
 }
@@ -582,6 +730,93 @@ void EndErase(Overlay& o) {
     }
     o.beforeErase.clear();
     if (GetCapture() == o.hwnd) ReleaseCapture();
+}
+
+// ---------- Selection tool: pick, move, resize, edit text ----------
+
+int ShapeAt(const Overlay& o, POINT p) {
+    for (int i = static_cast<int>(o.shapes.size()); i-- > 0;) {
+        if (ShapeHit(o.shapes[i], ToPt(p), o.scale)) return i;
+    }
+    return -1;
+}
+
+void PickMouseDown(Overlay& o, POINT p) {
+    // A handle or the inside of the current frame: start resizing or moving.
+    int frameHit = o.picked >= 0 ? FrameHit(o, PickFrame(o), p) : Outside;
+    int index = frameHit == Outside ? ShapeAt(o, p) : o.picked;
+    if (o.typing >= 0 && index != o.typing) {
+        CommitText(o);  // may remove an empty text and shift the list, so look again
+        frameHit = o.picked >= 0 ? FrameHit(o, PickFrame(o), p) : Outside;
+        index = frameHit == Outside ? ShapeAt(o, p) : o.picked;
+    }
+    if (index < 0) {
+        Unpick(o);
+        return;
+    }
+    {
+        ChromeChange change(o);
+        o.picked = index;
+    }
+    o.pickDrag = (frameHit >= TopLeft && frameHit <= Left) ? Drag::Resize : Drag::Move;
+    o.pickHandle = frameHit;
+    o.pickOriginal = o.shapes[index];
+    o.pickBox = ShapeBox(o.shapes[index], o.scale);
+    o.dragStart = p;
+    o.pickChanged = false;
+    o.pickCheckpoint = false;
+    SetCapture(o.hwnd);
+    // Clicking a text opens it for typing right away.
+    if (o.shapes[index].tool == Tool::Text && o.typing != index) {
+        Checkpoint(o);
+        o.pickCheckpoint = true;
+        BeginTyping(o, index);
+    }
+}
+
+void PickMouseMove(Overlay& o, POINT p) {
+    if (o.pickDrag == Drag::None || o.picked < 0) return;
+    const LONG dx = p.x - o.dragStart.x;
+    const LONG dy = p.y - o.dragStart.y;
+    if (!o.pickChanged && std::abs(dx) < 3 && std::abs(dy) < 3) return;
+    if (!o.pickChanged) {
+        o.pickChanged = true;
+        if (o.typing == o.picked) {
+            o.typingChanged = true;  // part of the same text edit for undo
+        } else if (!o.pickCheckpoint) {
+            Checkpoint(o);
+            o.pickCheckpoint = true;
+        }
+    }
+    ChromeChange change(o);
+    Shape& s = o.shapes[o.picked];
+    InvalidateShape(o, s);
+    if (o.pickDrag == Drag::Move) {
+        s = o.pickOriginal;
+        MoveShape(s, static_cast<float>(dx), static_cast<float>(dy));
+    } else {
+        const RECT b0 = o.pickBox;
+        const RECT nb = ResizeByHandle(b0, o.pickHandle, dx, dy);
+        const int h = o.pickHandle;
+        const float w0 = static_cast<float>(b0.right - b0.left);
+        const float h0 = static_cast<float>(b0.bottom - b0.top);
+        float sx = w0 >= 1 ? std::max(4.f, static_cast<float>(nb.right - nb.left)) / w0 : 1.f;
+        float sy = h0 >= 1 ? std::max(4.f, static_cast<float>(nb.bottom - nb.top)) / h0 : 1.f;
+        if (h == Left || h == Right) sy = s.tool == Tool::Text ? sx : 1.f;
+        if (h == Top || h == Bottom) sx = 1.f;
+        const bool leftSide = h == TopLeft || h == Left || h == BottomLeft;
+        const bool topSide = h == TopLeft || h == Top || h == TopRight;
+        const Pt anchor{static_cast<float>(leftSide ? b0.right : b0.left),
+                        static_cast<float>(topSide ? b0.bottom : b0.top)};
+        ScaleShape(s, o.pickOriginal, anchor, sx, sy);
+    }
+    InvalidateShape(o, s);
+}
+
+void PickMouseUp(Overlay& o) {
+    o.pickDrag = Drag::None;
+    if (GetCapture() == o.hwnd) ReleaseCapture();
+    ChromeChange change(o);  // undo button
 }
 
 // ---------- Painting ----------
@@ -604,6 +839,29 @@ void DrawFrame(const Overlay& o, HDC dc) {
     SelectObject(dc, oldBrush);
     SelectObject(dc, oldPen);
     DeleteObject(pen);
+}
+
+void DrawPickFrame(const Overlay& o, HDC dc) {
+    const RECT f = PickFrame(o);
+    if (IsRectEmpty(&f)) return;
+    HPEN dash = CreatePen(PS_DOT, 1, kAccent);
+    HGDIOBJ oldPen = SelectObject(dc, dash);
+    HGDIOBJ oldBrush = SelectObject(dc, GetStockObject(NULL_BRUSH));
+    SetBkMode(dc, OPAQUE);
+    SetBkColor(dc, RGB(255, 255, 255));
+    Rectangle(dc, f.left, f.top, f.right, f.bottom);
+    HPEN solid = CreatePen(PS_SOLID, Scaled(o, 1), kAccent);
+    SelectObject(dc, solid);
+    SelectObject(dc, GetStockObject(WHITE_BRUSH));
+    const int half = Scaled(o, 3);
+    for (int h = TopLeft; h <= Left; ++h) {
+        const POINT c = HandleCenter(f, h);
+        Rectangle(dc, c.x - half, c.y - half, c.x + half + 1, c.y + half + 1);
+    }
+    SelectObject(dc, oldBrush);
+    SelectObject(dc, oldPen);
+    DeleteObject(dash);
+    DeleteObject(solid);
 }
 
 void DrawEraserCircle(const Overlay& o, HDC dc) {
@@ -643,15 +901,16 @@ void Paint(Overlay& o) {
         BitBlt(o.backDc, s.left, s.top, s.right - s.left, s.bottom - s.top, o.shotDc, s.left, s.top, SRCCOPY);
         RECT clip;
         if (IntersectRect(&clip, &s, &p)) {
-            DrawShapes(o.backDc, clip, POINT{0, 0}, VisibleShapes(o), o.typing, o.scale);
+            DrawShapes(o.backDc, clip, POINT{0, 0}, VisibleShapes(o), CurrentCaret(o), o.scale);
         }
         DrawFrame(o, o.backDc);
+        DrawPickFrame(o, o.backDc);
         if (EraserCircleVisible(o)) DrawEraserCircle(o, o.backDc);
         if (o.tool == Tool::Area) {
             const std::wstring size = SizeText(o);
             DrawTextBox(o.backDc, size.c_str(), TextBox(o, size.c_str(), s, false));
         }
-        toolbar::Draw(o.backDc, PanelRect(o), PanelState(o), o.scale);
+        toolbar::Draw(o.backDc, PanelRect(o), PanelState(o), o.panelScale);
         if (o.hover != toolbar::kNone) {
             DrawTextBox(o.backDc, toolbar::Tip(o.hover), TipBox(o));
         }
@@ -706,7 +965,7 @@ void Finish(Overlay& o) {
     }
     HDC memory = CreateCompatibleDC(nullptr);
     HGDIOBJ old = SelectObject(memory, result.bitmap);
-    DrawShapes(memory, RECT{0, 0, w, h}, POINT{s.left, s.top}, VisibleShapes(o), false, o.scale);
+    DrawShapes(memory, RECT{0, 0, w, h}, POINT{s.left, s.top}, VisibleShapes(o), Caret{}, o.scale);
     GdiFlush();
     SelectObject(memory, old);
     DeleteDC(memory);
@@ -729,7 +988,9 @@ void OnPanelClick(Overlay& o, int id) {
     if (id < kFirstColor) SelectTool(o, static_cast<Tool>(id));
     else if (id < kCustomColor) SetColorValue(o, id - kFirstColor, kPalette[id - kFirstColor]);
     else if (id == kCustomColor) OpenColorWindow(o);
-    else if (id < kBold) SetSize(o, id - kFirstSize);
+    else if (id < kEraseWhole) SetSize(o, id - kFirstSize);
+    else if (id == kEraseWhole) SetEraseParts(o, false);
+    else if (id == kErasePart) SetEraseParts(o, true);
     else if (id == kBold) ChangeTextStyle(o, [](TextStyle& t) { t.bold = !t.bold; });
     else if (id == kItalic) ChangeTextStyle(o, [](TextStyle& t) { t.italic = !t.italic; });
     else if (id == kStrike) ChangeTextStyle(o, [](TextStyle& t) { t.strike = !t.strike; });
@@ -778,16 +1039,9 @@ void AreaMouseMove(Overlay& o, POINT p) {
             SetSelection(o, RECT{x, y, x + w, y + h});
             break;
         }
-        case Drag::Resize: {
-            LONG l = s0.left, t = s0.top, r = s0.right, b = s0.bottom;
-            const int hdl = o.dragHandle;
-            if (hdl == TopLeft || hdl == Left || hdl == BottomLeft) l += dx;
-            if (hdl == TopRight || hdl == Right || hdl == BottomRight) r += dx;
-            if (hdl == TopLeft || hdl == Top || hdl == TopRight) t += dy;
-            if (hdl == BottomLeft || hdl == Bottom || hdl == BottomRight) b += dy;
-            SetSelection(o, Normalize(l, t, r, b));
+        case Drag::Resize:
+            SetSelection(o, ResizeByHandle(s0, o.dragHandle, dx, dy));
             break;
-        }
         case Drag::None:
             break;
     }
@@ -822,14 +1076,25 @@ LPCWSTR CursorFor(int hit) {
 LPCWSTR CursorAt(const Overlay& o, POINT c) {
     if (o.picking) return IDC_HAND;
     if (PanelHit(o, c) != toolbar::kNone) return IDC_ARROW;
-    if (o.tool == Tool::Text) return IDC_IBEAM;
-    if (o.tool == Tool::Eraser) return PtInRect(&o.selection, c) ? nullptr : IDC_ARROW;  // the circle is the cursor
-    if (o.tool != Tool::Area) return IDC_CROSS;
-    const int hit = o.drag == Drag::Resize ? o.dragHandle
-                    : o.drag == Drag::Move ? Inside
-                    : o.drag == Drag::Create ? Outside
-                    : HitTest(o, c);
-    return CursorFor(hit);
+    switch (o.tool) {
+        case Tool::Text: return IDC_IBEAM;
+        case Tool::Eraser: return PtInRect(&o.selection, c) ? nullptr : IDC_ARROW;  // the circle is the cursor
+        case Tool::Select: {
+            if (o.pickDrag == Drag::Resize) return CursorFor(o.pickHandle);
+            if (o.pickDrag == Drag::Move) return IDC_SIZEALL;
+            const int hit = o.picked >= 0 ? FrameHit(o, PickFrame(o), c) : Outside;
+            if (hit != Outside) return CursorFor(hit);
+            return ShapeAt(o, c) >= 0 ? IDC_SIZEALL : IDC_ARROW;
+        }
+        case Tool::Area: {
+            const int hit = o.drag == Drag::Resize ? o.dragHandle
+                            : o.drag == Drag::Move ? Inside
+                            : o.drag == Drag::Create ? Outside
+                            : HitTest(o, c);
+            return CursorFor(hit);
+        }
+        default: return IDC_CROSS;
+    }
 }
 
 // ---------- Window ----------
@@ -840,6 +1105,7 @@ void RememberSettings(const Overlay& o) {
     g_settings.text = o.textStyle;
     g_settings.text.px = o.textStyle.px / o.scale;
     g_settings.textSize = o.textSize;
+    g_settings.eraseParts = o.eraseParts;
 }
 
 void LoadSettings(Overlay& o) {
@@ -849,6 +1115,7 @@ void LoadSettings(Overlay& o) {
     o.textStyle = g_settings.text;
     o.textStyle.px = g_settings.text.px * o.scale;
     o.textSize = g_settings.textSize;
+    o.eraseParts = g_settings.eraseParts;
 }
 
 void FreeOverlay(Overlay* o) {
@@ -875,11 +1142,9 @@ void FreeOverlay(Overlay* o) {
 void OnKeyDown(Overlay& o, WPARAM key) {
     const bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
     const bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
-    if (o.typing) {
+    if (o.typing >= 0) {
         if (key == VK_RETURN && shift) {
-            InvalidateShape(o, o.text);
-            o.text.text.push_back(L'\n');
-            InvalidateShape(o, o.text);
+            TypeChar(o, L'\n');
         } else if (key == VK_RETURN) {
             CommitText(o);
         } else if (key == VK_ESCAPE) {
@@ -888,6 +1153,8 @@ void OnKeyDown(Overlay& o, WPARAM key) {
             ChangeTextStyle(o, [](TextStyle& t) { t.bold = !t.bold; });
         } else if (ctrl && key == 'I') {
             ChangeTextStyle(o, [](TextStyle& t) { t.italic = !t.italic; });
+        } else if (ctrl && key == 'Z') {
+            Undo(o);
         }
         return;  // letters arrive as WM_CHAR
     }
@@ -897,6 +1164,8 @@ void OnKeyDown(Overlay& o, WPARAM key) {
         return;
     } else if (key == VK_TAB) {
         ToggleAreaMode(o);
+    } else if (key == VK_DELETE) {
+        DeletePicked(o);
     } else if (ctrl && key == 'Z') {
         shift ? Redo(o) : Undo(o);
     } else if (ctrl && key == 'Y') {
@@ -909,16 +1178,9 @@ void OnKeyDown(Overlay& o, WPARAM key) {
 }
 
 void OnChar(Overlay& o, wchar_t ch) {
-    if (!o.typing) return;
+    if (o.typing < 0) return;
     if (ch != L'\b' && (ch < L' ' || ch == 127)) return;  // Enter, Esc, Ctrl+letters
-    ChromeChange change(o);  // undo button state
-    InvalidateShape(o, o.text);
-    if (ch == L'\b') {
-        if (!o.text.text.empty()) o.text.text.pop_back();
-    } else {
-        o.text.text.push_back(ch);
-    }
-    InvalidateShape(o, o.text);
+    TypeChar(o, ch);
 }
 
 void OnMouseDown(Overlay& o, POINT p) {
@@ -929,7 +1191,7 @@ void OnMouseDown(Overlay& o, POINT p) {
         return;
     }
     SetFocus(o.hwnd);
-    if (o.tool != Tool::Area && !PtInRect(&o.selection, p)) {
+    if (o.tool != Tool::Area && o.tool != Tool::Select && !PtInRect(&o.selection, p)) {
         CommitText(o);  // drawing outside the selection would not be seen or saved
         return;
     }
@@ -937,6 +1199,9 @@ void OnMouseDown(Overlay& o, POINT p) {
         case Tool::Area:
             CommitText(o);
             AreaMouseDown(o, p);
+            break;
+        case Tool::Select:
+            PickMouseDown(o, p);
             break;
         case Tool::Text:
             StartText(o, p);
@@ -956,12 +1221,15 @@ void OnMouseMove(Overlay& o, POINT p) {
     {
         ChromeChange change(o);  // hint under the mouse and the eraser circle follow the mouse
         o.mouse = p;
-        o.hover = o.drawing || o.erasing || o.drag != Drag::None ? toolbar::kNone : PanelHit(o, p);
+        const bool busy = o.drawing || o.erasing || o.drag != Drag::None || o.pickDrag != Drag::None;
+        o.hover = busy ? toolbar::kNone : PanelHit(o, p);
     }
     if (o.drawing) {
         ContinueStroke(o, p);
     } else if (o.erasing) {
         EraseAt(o, p);
+    } else if (o.pickDrag != Drag::None) {
+        PickMouseMove(o, p);
     } else if (o.drag != Drag::None) {
         AreaMouseMove(o, p);
     }
@@ -972,6 +1240,8 @@ void OnMouseUp(Overlay& o) {
         EndStroke(o);
     } else if (o.erasing) {
         EndErase(o);
+    } else if (o.pickDrag != Drag::None) {
+        PickMouseUp(o);
     } else if (o.drag != Drag::None) {
         AreaMouseUp(o);
     }
@@ -1021,6 +1291,7 @@ LRESULT CALLBACK OverlayProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case WM_CAPTURECHANGED:
             if (o->drawing) EndStroke(*o);
             if (o->erasing) EndErase(*o);
+            o->pickDrag = Drag::None;
             o->drag = Drag::None;
             return 0;
         case WM_KEYDOWN:
@@ -1064,6 +1335,7 @@ bool CreateOverlayWindow(HINSTANCE instance, HMONITOR monitor, bool picking) {
     UINT dpiX = 96, dpiY = 96;
     if (FAILED(GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &dpiX, &dpiY))) dpiX = 96;
     o->scale = static_cast<float>(dpiX) / 96.f;
+    o->panelScale = o->scale * kPanelSize;
     o->unit = std::max<int>(1, static_cast<int>((dpiX + 48) / 96));
     LoadSettings(*o);
 
@@ -1149,7 +1421,7 @@ bool IsOverlayOpen() {
 bool IsOverlayTyping() {
     if (g_dialogOpen) return true;  // the colour or font window needs Esc and Enter itself
     for (const Overlay* o : g_overlays) {
-        if (o->typing) return true;
+        if (o->typing >= 0) return true;
     }
     return false;
 }

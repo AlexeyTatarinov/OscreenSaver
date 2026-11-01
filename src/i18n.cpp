@@ -49,7 +49,7 @@ const wchar_t* const kStrings[][3] = {
     /* TipRect */ {L"Rectangle", L"Прямоугольник", L"Прямокутник"},
     /* TipEllipse */ {L"Ellipse", L"Эллипс", L"Еліпс"},
     /* TipText */ {L"Text", L"Текст", L"Текст"},
-    /* TipEraser */ {L"Eraser: removes what you drew", L"Ластик: стирает нарисованное", L"Гумка: стирає намальоване"},
+    /* TipEraser */ {L"Eraser", L"Ластик", L"Гумка"},
     /* TipColor */ {L"Colour", L"Цвет", L"Колір"},
     /* TipSize */ {L"Line size", L"Толщина", L"Товщина"},
     /* TipUndo */ {L"Undo (Ctrl+Z)", L"Отменить (Ctrl+Z)", L"Скасувати (Ctrl+Z)"},
@@ -61,6 +61,9 @@ const wchar_t* const kStrings[][3] = {
     /* TipItalic */ {L"Italic (Ctrl+I)", L"Курсив (Ctrl+I)", L"Курсив (Ctrl+I)"},
     /* TipStrike */ {L"Strikethrough", L"Зачёркнутый", L"Закреслений"},
     /* TipFont */ {L"Font and size…", L"Шрифт и размер…", L"Шрифт і розмір…"},
+    /* TipSelect */ {L"Select: move, resize; double-click a text to edit it", L"Выбор: перемещение, размер; двойной щелчок по тексту — правка", L"Вибір: переміщення, розмір; подвійний клік по тексту — редагування"},
+    /* TipEraseWhole */ {L"Erase whole objects", L"Стирать объекты целиком", L"Стирати об’єкти цілком"},
+    /* TipErasePart */ {L"Erase parts (like Paint)", L"Стирать частично (как в Paint)", L"Стирати частково (як у Paint)"},
 };
 
 }  // namespace

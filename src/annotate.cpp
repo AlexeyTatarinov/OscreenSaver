@@ -25,109 +25,238 @@ G::Color ToColor(COLORREF c, BYTE alpha = 255) {
     return G::Color(alpha, GetRValue(c), GetGValue(c), GetBValue(c));
 }
 
-// ---------- Text ----------
+void Prepare(G::Graphics& g) {
+    g.SetSmoothingMode(G::SmoothingModeAntiAlias);
+    g.SetPixelOffsetMode(G::PixelOffsetModeHalf);
+    g.SetTextRenderingHint(G::TextRenderingHintAntiAlias);
+}
 
-struct TextTools {
+// ---------- Text layout: pieces with different looks on shared lines ----------
+
+struct FontPack {
     std::unique_ptr<G::FontFamily> family;
     std::unique_ptr<G::Font> font;
-    std::unique_ptr<G::StringFormat> format;
+    float ascent = 0;   // from the top of the letters to the base line
+    float descent = 0;
+    float height = 0;   // line height
 };
 
-TextTools MakeTextTools(const TextStyle& st) {
-    TextTools t;
-    t.family = std::make_unique<G::FontFamily>(st.font.c_str());
-    if (!t.family->IsAvailable()) t.family = std::make_unique<G::FontFamily>(L"Segoe UI");
-    if (!t.family->IsAvailable()) t.family.reset(G::FontFamily::GenericSansSerif()->Clone());
+FontPack MakeFont(const TextStyle& st, G::Graphics& g) {
+    FontPack f;
+    f.family = std::make_unique<G::FontFamily>(st.font.c_str());
+    if (!f.family->IsAvailable()) f.family = std::make_unique<G::FontFamily>(L"Segoe UI");
+    if (!f.family->IsAvailable()) f.family.reset(G::FontFamily::GenericSansSerif()->Clone());
     INT style = G::FontStyleRegular;
     if (st.bold) style |= G::FontStyleBold;
     if (st.italic) style |= G::FontStyleItalic;
-    if (st.strike) style |= G::FontStyleStrikeout;
-    if (st.underline) style |= G::FontStyleUnderline;
+    // Strikethrough and underline are drawn as lines by DrawText, the same way for every font.
     // Some fonts lack a bold or italic face; fall back to what the font has.
-    if (!t.family->IsStyleAvailable(style)) style &= ~(G::FontStyleBold | G::FontStyleItalic);
-    t.font = std::make_unique<G::Font>(t.family.get(), std::max(4.f, st.px), style, G::UnitPixel);
-    t.format.reset(G::StringFormat::GenericTypographic()->Clone());
-    t.format->SetFormatFlags(t.format->GetFormatFlags() | G::StringFormatFlagsMeasureTrailingSpaces);
-    return t;
+    if (!f.family->IsStyleAvailable(style)) style &= ~(G::FontStyleBold | G::FontStyleItalic);
+    const float size = std::max(4.f, st.px);
+    f.font = std::make_unique<G::Font>(f.family.get(), size, style, G::UnitPixel);
+    const float em = std::max<float>(1, f.family->GetEmHeight(style));
+    f.ascent = size * f.family->GetCellAscent(style) / em;
+    f.descent = size * f.family->GetCellDescent(style) / em;
+    f.height = std::max(f.font->GetHeight(&g), f.ascent + f.descent);
+    return f;
 }
 
-// Size of a text block in pixels (empty text = one empty line).
-G::RectF MeasureText(G::Graphics& g, const Shape& s, const TextTools& t) {
-    G::RectF box(0, 0, 0, t.font->GetHeight(&g));
-    if (!s.text.empty()) {
-        g.MeasureString(s.text.c_str(), static_cast<INT>(s.text.size()), t.font.get(), G::PointF(0, 0),
-                        t.format.get(), &box);
-        // A trailing new line is not counted by MeasureString; add its height.
-        if (s.text.back() == L'\n') box.Height += t.font->GetHeight(&g);
+const G::StringFormat& Format() {
+    static G::StringFormat* format = [] {
+        G::StringFormat* f = G::StringFormat::GenericTypographic()->Clone();
+        f->SetFormatFlags(f->GetFormatFlags() | G::StringFormatFlagsMeasureTrailingSpaces |
+                          G::StringFormatFlagsNoWrap);
+        return f;
+    }();
+    return *format;
+}
+
+struct Piece {
+    std::wstring text;
+    size_t font = 0;  // index in Layout::fonts
+    float x = 0;
+    size_t line = 0;
+};
+
+struct Line {
+    float top = 0;
+    float ascent = 0;
+    float descent = 0;
+    float height = 0;
+    float right = 0;
+};
+
+struct Layout {
+    std::vector<FontPack> fonts;  // one per run, then the cursor's
+    std::vector<Piece> pieces;
+    std::vector<Line> lines;
+    float caretX = 0;
+    float caretTop = 0;
+    float caretHeight = 0;
+    G::RectF box;
+};
+
+void Grow(Line& line, const FontPack& f) {
+    line.ascent = std::max(line.ascent, f.ascent);
+    line.descent = std::max(line.descent, f.descent);
+    line.height = std::max(line.height, f.height);
+}
+
+Layout MakeLayout(G::Graphics& g, const Shape& s, const TextStyle* caretStyle) {
+    Layout L;
+    const Pt origin = s.points.empty() ? Pt{} : s.points[0];
+    for (const TextRun& run : s.runs) L.fonts.push_back(MakeFont(run.style, g));
+    const TextStyle fallback;
+    L.fonts.push_back(MakeFont(caretStyle ? *caretStyle : (s.runs.empty() ? fallback : s.runs.back().style), g));
+    const size_t caretFont = L.fonts.size() - 1;
+
+    L.lines.emplace_back();
+    Grow(L.lines.back(), L.fonts[s.runs.empty() ? caretFont : 0]);
+    float x = origin.x;
+    for (size_t r = 0; r < s.runs.size(); ++r) {
+        const std::wstring& text = s.runs[r].text;
+        size_t start = 0;
+        while (true) {
+            const size_t nl = text.find(L'\n', start);
+            const std::wstring part = text.substr(start, nl == std::wstring::npos ? std::wstring::npos : nl - start);
+            if (!part.empty()) {
+                G::RectF m;
+                g.MeasureString(part.c_str(), static_cast<INT>(part.size()), L.fonts[r].font.get(), G::PointF(0, 0),
+                                &Format(), &m);
+                L.pieces.push_back(Piece{part, r, x, L.lines.size() - 1});
+                x += m.Width;
+                Grow(L.lines.back(), L.fonts[r]);
+            }
+            L.lines.back().right = x;
+            if (nl == std::wstring::npos) break;
+            L.lines.emplace_back();  // a new line starts with the look of the text that made it
+            Grow(L.lines.back(), L.fonts[r]);
+            x = origin.x;
+            start = nl + 1;
+        }
     }
-    box.X = static_cast<float>(s.points[0].x);
-    box.Y = static_cast<float>(s.points[0].y);
-    return box;
+    if (caretStyle) Grow(L.lines.back(), L.fonts[caretFont]);
+    L.lines.back().right = std::max(L.lines.back().right, x);
+
+    float top = origin.y;
+    float right = origin.x;
+    for (Line& line : L.lines) {
+        line.top = top;
+        top += line.height;
+        right = std::max(right, line.right);
+    }
+    const Line& last = L.lines.back();
+    const FontPack& cf = L.fonts[caretFont];
+    L.caretX = x;
+    L.caretTop = last.top + last.ascent - cf.ascent;
+    L.caretHeight = cf.ascent + cf.descent;
+    L.box = G::RectF(origin.x, origin.y, right - origin.x, top - origin.y);
+    return L;
 }
 
-RECT TextRect(const Shape& s) {
-    if (s.points.empty()) return RECT{0, 0, 0, 0};
+G::RectF TextBox(const Shape& s) {
     HDC dc = CreateCompatibleDC(nullptr);
     G::RectF box;
     {
         G::Graphics g(dc);
-        g.SetTextRenderingHint(G::TextRenderingHintAntiAlias);
-        const TextTools t = MakeTextTools(s.style);
-        box = MeasureText(g, s, t);
+        Prepare(g);
+        box = MakeLayout(g, s, nullptr).box;
     }
     DeleteDC(dc);
-    return RECT{static_cast<LONG>(std::floor(box.X)), static_cast<LONG>(std::floor(box.Y)),
-                static_cast<LONG>(std::ceil(box.GetRight())) + 2, static_cast<LONG>(std::ceil(box.GetBottom()))};
+    return box;
 }
 
-void DrawTextShape(G::Graphics& g, const Shape& s, POINT off, float scale, bool caret) {
+void DrawText(G::Graphics& g, const Shape& s, const TextStyle* caretStyle, COLORREF caretColor, float scale) {
     if (s.points.empty()) return;
-    const TextTools t = MakeTextTools(s.style);
-    G::SolidBrush brush(ToColor(s.color));
-    const G::PointF origin(static_cast<float>(s.points[0].x - off.x), static_cast<float>(s.points[0].y - off.y));
-    g.SetTextRenderingHint(G::TextRenderingHintAntiAlias);
-    if (!s.text.empty()) {
-        g.DrawString(s.text.c_str(), static_cast<INT>(s.text.size()), t.font.get(), origin, t.format.get(),
+    const Layout L = MakeLayout(g, s, caretStyle);
+    for (const Piece& p : L.pieces) {
+        const Line& line = L.lines[p.line];
+        const FontPack& f = L.fonts[p.font];
+        G::SolidBrush brush(ToColor(s.runs[p.font].color));
+        const float y = line.top + line.ascent - f.ascent;  // shared base line for different sizes
+        g.DrawString(p.text.c_str(), static_cast<INT>(p.text.size()), f.font.get(), G::PointF(p.x, y), &Format(),
                      &brush);
+        const TextStyle& st = s.runs[p.font].style;
+        if (st.strike || st.underline) {
+            G::RectF m;
+            g.MeasureString(p.text.c_str(), static_cast<INT>(p.text.size()), f.font.get(), G::PointF(0, 0),
+                            &Format(), &m);
+            const float base = line.top + line.ascent;
+            const float thick = std::max(1.f, st.px / 14.f);
+            G::Pen pen(ToColor(s.runs[p.font].color), thick);
+            if (st.strike) {
+                const float yy = base - f.ascent * 0.3f;
+                g.DrawLine(&pen, p.x, yy, p.x + m.Width, yy);
+            }
+            if (st.underline) {
+                const float yy = base + std::max(thick, f.descent * 0.35f);
+                g.DrawLine(&pen, p.x, yy, p.x + m.Width, yy);
+            }
+        }
     }
-    if (!caret) return;
-
-    // Cursor after the last character of the last line.
-    const size_t lineStart = s.text.find_last_of(L'\n');
-    const std::wstring last = lineStart == std::wstring::npos ? s.text : s.text.substr(lineStart + 1);
-    const int lineIndex = static_cast<int>(std::count(s.text.begin(), s.text.end(), L'\n'));
-    G::RectF box;
-    if (!last.empty()) {
-        g.MeasureString(last.c_str(), static_cast<INT>(last.size()), t.font.get(), G::PointF(0, 0),
-                        t.format.get(), &box);
+    if (caretStyle) {
+        G::Pen pen(ToColor(caretColor), std::max(1.f, scale));
+        const float x = L.caretX + 1;
+        g.DrawLine(&pen, x, L.caretTop, x, L.caretTop + L.caretHeight);
     }
-    const float lineHeight = t.font->GetHeight(&g);
-    const float x = origin.X + box.Width + 1;
-    const float y = origin.Y + lineHeight * lineIndex;
-    G::Pen pen(ToColor(s.color), std::max(1.f, scale));
-    g.DrawLine(&pen, x, y, x, y + lineHeight);
 }
 
-// ---------- Lines ----------
+// ---------- Lines and figures ----------
 
-void DrawPath(G::Graphics& g, const Shape& s, POINT off, float width, const G::Color& color) {
-    if (s.points.empty()) return;
-    if (s.points.size() == 1) {
+void DrawPath(G::Graphics& g, const std::vector<Pt>& points, float width, const G::Color& color) {
+    if (points.empty()) return;
+    if (points.size() == 1) {
         G::SolidBrush brush(color);
-        const float x = static_cast<float>(s.points[0].x - off.x);
-        const float y = static_cast<float>(s.points[0].y - off.y);
-        g.FillEllipse(&brush, x - width / 2, y - width / 2, width, width);
+        g.FillEllipse(&brush, points[0].x - width / 2, points[0].y - width / 2, width, width);
         return;
     }
     std::vector<G::PointF> pts;
-    pts.reserve(s.points.size());
-    for (const POINT& p : s.points) {
-        pts.emplace_back(static_cast<float>(p.x - off.x), static_cast<float>(p.y - off.y));
-    }
+    pts.reserve(points.size());
+    for (const Pt& p : points) pts.emplace_back(p.x, p.y);
     G::Pen pen(color, width);
     pen.SetLineCap(G::LineCapRound, G::LineCapRound, G::DashCapRound);
     pen.SetLineJoin(G::LineJoinRound);
     g.DrawLines(&pen, pts.data(), static_cast<INT>(pts.size()));
+}
+
+void DrawOne(G::Graphics& g, const Shape& s, const TextStyle* caretStyle, COLORREF caretColor, float scale) {
+    const float width = StrokeWidth(s.tool, s.size, scale);
+    switch (s.tool) {
+        case Tool::Pencil:
+        case Tool::Brush:
+            DrawPath(g, s.points, width, ToColor(s.color));
+            break;
+        case Tool::Marker:
+            DrawPath(g, s.points, width, ToColor(s.color, 110));  // see-through highlighter
+            break;
+        case Tool::Arrow:
+        case Tool::Rect:
+        case Tool::Ellipse: {
+            if (s.points.size() < 2) break;
+            const Pt a = s.points[0], b = s.points[1];
+            G::Pen pen(ToColor(s.color), width);
+            if (s.tool == Tool::Arrow) {
+                if (std::hypot(b.x - a.x, b.y - a.y) < 2) break;
+                const float head = std::max(3.f, 14.f * scale / width);  // in line widths
+                G::AdjustableArrowCap cap(head, head * 0.9f, TRUE);
+                pen.SetCustomEndCap(&cap);
+                pen.SetStartCap(G::LineCapRound);
+                g.DrawLine(&pen, a.x, a.y, b.x, b.y);
+            } else {
+                const float l = std::min(a.x, b.x), t = std::min(a.y, b.y);
+                const float w = std::fabs(b.x - a.x), h = std::fabs(b.y - a.y);
+                pen.SetLineJoin(G::LineJoinRound);
+                if (s.tool == Tool::Rect) g.DrawRectangle(&pen, l, t, w, h);
+                else g.DrawEllipse(&pen, l, t, w, h);
+            }
+            break;
+        }
+        case Tool::Text:
+            DrawText(g, s, caretStyle, caretColor, scale);
+            break;
+        default:
+            break;
+    }
 }
 
 double SegmentDistance(double px, double py, double ax, double ay, double bx, double by) {
@@ -139,27 +268,36 @@ double SegmentDistance(double px, double py, double ax, double ay, double bx, do
 }
 
 // Outline of a shape as a list of points (closed shapes repeat the first point).
-std::vector<G::PointF> Outline(const Shape& s) {
-    std::vector<G::PointF> pts;
+std::vector<Pt> Outline(const Shape& s) {
     if (s.tool == Tool::Rect || s.tool == Tool::Ellipse) {
+        std::vector<Pt> pts;
         if (s.points.size() < 2) return pts;
-        const float l = static_cast<float>(std::min(s.points[0].x, s.points[1].x));
-        const float r = static_cast<float>(std::max(s.points[0].x, s.points[1].x));
-        const float t = static_cast<float>(std::min(s.points[0].y, s.points[1].y));
-        const float b = static_cast<float>(std::max(s.points[0].y, s.points[1].y));
-        if (s.tool == Tool::Rect) {
-            pts = {{l, t}, {r, t}, {r, b}, {l, b}, {l, t}};
-        } else {
-            const float cx = (l + r) / 2, cy = (t + b) / 2, rx = (r - l) / 2, ry = (b - t) / 2;
-            for (int i = 0; i <= 48; ++i) {
-                const double a = i * 2 * 3.14159265358979 / 48;
-                pts.emplace_back(cx + rx * static_cast<float>(std::cos(a)), cy + ry * static_cast<float>(std::sin(a)));
-            }
+        const float l = std::min(s.points[0].x, s.points[1].x), r = std::max(s.points[0].x, s.points[1].x);
+        const float t = std::min(s.points[0].y, s.points[1].y), b = std::max(s.points[0].y, s.points[1].y);
+        if (s.tool == Tool::Rect) return {{l, t}, {r, t}, {r, b}, {l, b}, {l, t}};
+        const float cx = (l + r) / 2, cy = (t + b) / 2, rx = (r - l) / 2, ry = (b - t) / 2;
+        for (int i = 0; i <= 48; ++i) {
+            const double a = i * 2 * 3.14159265358979 / 48;
+            pts.push_back(Pt{cx + rx * static_cast<float>(std::cos(a)), cy + ry * static_cast<float>(std::sin(a))});
         }
         return pts;
     }
-    for (const POINT& p : s.points) pts.emplace_back(static_cast<float>(p.x), static_cast<float>(p.y));
-    return pts;
+    return s.points;
+}
+
+bool NearOutline(const Shape& s, Pt p, double reach) {
+    const std::vector<Pt> pts = Outline(s);
+    if (pts.empty()) return false;
+    if (pts.size() == 1) return std::hypot(p.x - pts[0].x, p.y - pts[0].y) <= reach;
+    for (size_t i = 1; i < pts.size(); ++i) {
+        if (SegmentDistance(p.x, p.y, pts[i - 1].x, pts[i - 1].y, pts[i].x, pts[i].y) <= reach) return true;
+    }
+    return false;
+}
+
+RECT ToRect(float l, float t, float r, float b) {
+    return RECT{static_cast<LONG>(std::floor(l)), static_cast<LONG>(std::floor(t)), static_cast<LONG>(std::ceil(r)),
+                static_cast<LONG>(std::ceil(b))};
 }
 
 }  // namespace
@@ -187,7 +325,7 @@ float StrokeWidth(Tool tool, int size, float scale) {
 }
 
 float EraserRadius(int size, float scale) {
-    static const float kRadius[kSizeCount] = {8.f, 16.f, 30.f};
+    static const float kRadius[kSizeCount] = {6.f, 12.f, 24.f};
     return kRadius[std::clamp(size, 0, kSizeCount - 1)] * scale;
 }
 
@@ -196,100 +334,130 @@ float TextPresetPx(int size, float scale) {
     return kSizes[std::clamp(size, 0, kSizeCount - 1)] * scale;
 }
 
-RECT ShapeBounds(const Shape& s, float scale) {
+bool IsTwoPointTool(Tool t) { return t == Tool::Arrow || t == Tool::Rect || t == Tool::Ellipse; }
+
+RECT ShapeBox(const Shape& s, float) {
     if (s.points.empty()) return RECT{0, 0, 0, 0};
     if (s.tool == Tool::Text) {
-        RECT r = TextRect(s);
-        const int grow = static_cast<int>(s.style.px / 4 + 4 * scale);  // italic overhang, caret
-        InflateRect(&r, grow, grow);
-        return r;
+        const G::RectF b = TextBox(s);
+        return ToRect(b.X, b.Y, b.GetRight(), b.GetBottom());
     }
-    RECT r = {s.points[0].x, s.points[0].y, s.points[0].x, s.points[0].y};
-    for (const POINT& p : s.points) {
-        r.left = std::min(r.left, p.x);
-        r.top = std::min(r.top, p.y);
-        r.right = std::max(r.right, p.x);
-        r.bottom = std::max(r.bottom, p.y);
+    float l = s.points[0].x, t = s.points[0].y, r = l, b = t;
+    for (const Pt& p : s.points) {
+        l = std::min(l, p.x);
+        t = std::min(t, p.y);
+        r = std::max(r, p.x);
+        b = std::max(b, p.y);
     }
-    const float width = StrokeWidth(s.tool, s.size, scale);
-    const int grow = static_cast<int>(width * (s.tool == Tool::Arrow ? 4.f : 1.f) + 20 * scale) + 2;
+    return ToRect(l, t, r, b);
+}
+
+RECT ShapeBounds(const Shape& s, float scale) {
+    RECT r = ShapeBox(s, scale);
+    if (IsRectEmpty(&r) && s.points.empty()) return r;
+    int grow;
+    if (s.tool == Tool::Text) {
+        float px = 24 * scale;
+        for (const TextRun& run : s.runs) px = std::max(px, run.style.px);
+        grow = static_cast<int>(px / 2 + 4 * scale);  // italic overhang, cursor
+    } else {
+        const float width = StrokeWidth(s.tool, s.size, scale);
+        grow = static_cast<int>(width * (s.tool == Tool::Arrow ? 4.f : 1.f) + 20 * scale) + 2;
+    }
     InflateRect(&r, grow, grow);
     return r;
 }
 
-bool TextContains(const Shape& s, POINT p, float scale) {
-    if (s.tool != Tool::Text) return false;
-    RECT r = TextRect(s);
-    const int grow = static_cast<int>(4 * scale);
-    InflateRect(&r, grow, grow);
-    return PtInRect(&r, p) != FALSE;
-}
-
-bool ShapeTouched(const Shape& s, POINT p, float r, float scale) {
+bool ShapeTouched(const Shape& s, Pt p, float r, float scale) {
     if (s.points.empty()) return false;
     if (s.tool == Tool::Text) {
-        RECT box = TextRect(s);
+        RECT box = ShapeBox(s, scale);
         InflateRect(&box, static_cast<int>(r), static_cast<int>(r));
-        return PtInRect(&box, p) != FALSE;
+        return PtInRect(&box, POINT{static_cast<LONG>(p.x), static_cast<LONG>(p.y)}) != FALSE;
     }
-    const double reach = r + StrokeWidth(s.tool, s.size, scale) / 2;
-    const std::vector<G::PointF> pts = Outline(s);
-    if (pts.size() == 1) return std::hypot(p.x - pts[0].X, p.y - pts[0].Y) <= reach;
-    for (size_t i = 1; i < pts.size(); ++i) {
-        if (SegmentDistance(p.x, p.y, pts[i - 1].X, pts[i - 1].Y, pts[i].X, pts[i].Y) <= reach) return true;
-    }
-    return false;
+    return NearOutline(s, p, r + StrokeWidth(s.tool, s.size, scale) / 2);
 }
 
-void DrawShapes(HDC dc, const RECT& clip, POINT off, const std::vector<const Shape*>& shapes, bool caret,
-                float scale) {
-    if (shapes.empty()) return;
-    G::Graphics g(dc);
-    g.SetSmoothingMode(G::SmoothingModeAntiAlias);
-    g.SetPixelOffsetMode(G::PixelOffsetModeHalf);
-    g.SetClip(G::Rect(clip.left, clip.top, clip.right - clip.left, clip.bottom - clip.top));
+bool ShapeHit(const Shape& s, Pt p, float scale) {
+    if (s.points.empty()) return false;
+    if (s.tool == Tool::Text || s.tool == Tool::Rect || s.tool == Tool::Ellipse) {
+        RECT box = ShapeBox(s, scale);
+        const int grow = static_cast<int>(StrokeWidth(s.tool, s.size, scale) / 2 + 5 * scale);
+        InflateRect(&box, grow, grow);
+        return PtInRect(&box, POINT{static_cast<LONG>(p.x), static_cast<LONG>(p.y)}) != FALSE;
+    }
+    return NearOutline(s, p, StrokeWidth(s.tool, s.size, scale) / 2 + 5 * scale);
+}
 
-    for (size_t i = 0; i < shapes.size(); ++i) {
-        const Shape& s = *shapes[i];
-        const float width = StrokeWidth(s.tool, s.size, scale);
-        switch (s.tool) {
-            case Tool::Pencil:
-            case Tool::Brush:
-                DrawPath(g, s, off, width, ToColor(s.color));
-                break;
-            case Tool::Marker:
-                DrawPath(g, s, off, width, ToColor(s.color, 110));  // see-through highlighter
-                break;
-            case Tool::Arrow:
-            case Tool::Rect:
-            case Tool::Ellipse: {
-                if (s.points.size() < 2) break;
-                const float x1 = static_cast<float>(s.points[0].x - off.x);
-                const float y1 = static_cast<float>(s.points[0].y - off.y);
-                const float x2 = static_cast<float>(s.points[1].x - off.x);
-                const float y2 = static_cast<float>(s.points[1].y - off.y);
-                G::Pen pen(ToColor(s.color), width);
-                if (s.tool == Tool::Arrow) {
-                    if (std::hypot(x2 - x1, y2 - y1) < 2) break;
-                    const float head = std::max(3.f, 14.f * scale / width);  // in line widths
-                    G::AdjustableArrowCap cap(head, head * 0.9f, TRUE);
-                    pen.SetCustomEndCap(&cap);
-                    pen.SetStartCap(G::LineCapRound);
-                    g.DrawLine(&pen, x1, y1, x2, y2);
-                } else {
-                    const float l = std::min(x1, x2), t = std::min(y1, y2);
-                    const float w = std::fabs(x2 - x1), h = std::fabs(y2 - y1);
-                    pen.SetLineJoin(G::LineJoinRound);
-                    if (s.tool == Tool::Rect) g.DrawRectangle(&pen, l, t, w, h);
-                    else g.DrawEllipse(&pen, l, t, w, h);
-                }
-                break;
-            }
-            case Tool::Text:
-                DrawTextShape(g, s, off, scale, caret && i + 1 == shapes.size());
-                break;
-            default:
-                break;
+void MoveShape(Shape& s, float dx, float dy) {
+    for (Pt& p : s.points) {
+        p.x += dx;
+        p.y += dy;
+    }
+    for (Erasure& e : s.erasures) {
+        for (Pt& p : e.points) {
+            p.x += dx;
+            p.y += dy;
         }
     }
+}
+
+void ScaleShape(Shape& s, const Shape& original, Pt a, float sx, float sy) {
+    s = original;
+    const bool text = s.tool == Tool::Text;
+    if (text) sx = sy;  // letters keep their proportions
+    auto map = [&](Pt& p) {
+        p.x = a.x + (p.x - a.x) * sx;
+        p.y = a.y + (p.y - a.y) * sy;
+    };
+    for (Pt& p : s.points) map(p);
+    for (Erasure& e : s.erasures) {
+        for (Pt& p : e.points) map(p);
+        if (text) e.width *= sy;
+    }
+    if (text) {
+        for (TextRun& run : s.runs) run.style.px = std::clamp(run.style.px * sy, 4.f, 1000.f);
+    }
+}
+
+void DrawShapes(HDC dc, const RECT& clip, POINT off, const std::vector<const Shape*>& shapes, const Caret& caret,
+                float scale) {
+    const int w = clip.right - clip.left;
+    const int h = clip.bottom - clip.top;
+    if (shapes.empty() || w <= 0 || h <= 0) return;
+
+    // Everything is drawn on a transparent layer first. Rubbed-out parts become transparent there,
+    // so the screenshot shows through, and only then the layer is put over the screenshot.
+    G::Bitmap layer(w, h, PixelFormat32bppPARGB);
+    {
+        G::Graphics lg(&layer);
+        Prepare(lg);
+        const float tx = -static_cast<float>(clip.left + off.x);
+        const float ty = -static_cast<float>(clip.top + off.y);
+        lg.TranslateTransform(tx, ty);
+        for (size_t i = 0; i < shapes.size(); ++i) {
+            const Shape& s = *shapes[i];
+            const TextStyle* cs = &s == caret.shape ? &caret.style : nullptr;
+            if (s.erasures.empty()) {
+                DrawOne(lg, s, cs, caret.color, scale);
+                continue;
+            }
+            // A partly erased object is drawn on its own layer, then the erased parts are cleared.
+            G::Bitmap own(w, h, PixelFormat32bppPARGB);
+            {
+                G::Graphics og(&own);
+                Prepare(og);
+                og.TranslateTransform(tx, ty);
+                DrawOne(og, s, cs, caret.color, scale);
+                og.SetCompositingMode(G::CompositingModeSourceCopy);
+                const G::Color clear(0, 0, 0, 0);
+                for (const Erasure& e : s.erasures) DrawPath(og, e.points, e.width, clear);
+            }
+            lg.ResetTransform();
+            lg.DrawImage(&own, G::Rect(0, 0, w, h), 0, 0, w, h, G::UnitPixel);
+            lg.TranslateTransform(tx, ty);
+        }
+    }
+    G::Graphics g(dc);
+    g.DrawImage(&layer, G::Rect(clip.left, clip.top, w, h), 0, 0, w, h, G::UnitPixel);
 }

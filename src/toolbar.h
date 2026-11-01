@@ -11,7 +11,9 @@ namespace toolbar {
 constexpr int kFirstColor = static_cast<int>(Tool::Count);
 constexpr int kCustomColor = kFirstColor + kColorCount;  // opens the colour window
 constexpr int kFirstSize = kCustomColor + 1;
-constexpr int kBold = kFirstSize + kSizeCount;           // text buttons: shown only for the text tool
+constexpr int kEraseWhole = kFirstSize + kSizeCount;     // eraser buttons: shown only for the eraser
+constexpr int kErasePart = kEraseWhole + 1;
+constexpr int kBold = kErasePart + 1;                    // text buttons: shown only for the text tool
 constexpr int kItalic = kBold + 1;
 constexpr int kStrike = kItalic + 1;
 constexpr int kFont = kStrike + 1;                        // opens the font window
@@ -31,6 +33,7 @@ struct State {
     bool bold = false;
     bool italic = false;
     bool strike = false;
+    bool eraseParts = false;  // eraser rubs out parts (like Paint) instead of removing whole objects
     bool canUndo = false;
     bool canRedo = false;
     int hover = kNone;

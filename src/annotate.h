@@ -6,13 +6,20 @@
 #include <vector>
 
 // Drawing tools. The order matches the buttons on the panel.
-enum class Tool { Area, Pencil, Marker, Brush, Arrow, Rect, Ellipse, Text, Eraser, Count };
+enum class Tool { Area, Select, Pencil, Marker, Brush, Arrow, Rect, Ellipse, Text, Eraser, Count };
 
 // Fixed colours on the panel: green, red, white, black. Any other colour is picked in the colour window.
 constexpr int kColorCount = 4;
 constexpr int kDefaultColor = 1;  // red
 extern const COLORREF kPalette[kColorCount];
 constexpr int kSizeCount = 3;
+
+struct Pt {
+    float x = 0;
+    float y = 0;
+};
+
+inline Pt ToPt(POINT p) { return Pt{static_cast<float>(p.x), static_cast<float>(p.y)}; }
 
 struct TextStyle {
     std::wstring font = L"Segoe UI";
@@ -21,40 +28,70 @@ struct TextStyle {
     bool italic = false;
     bool strike = false;
     bool underline = false;
+
+    bool operator==(const TextStyle& o) const {
+        return font == o.font && px == o.px && bold == o.bold && italic == o.italic && strike == o.strike &&
+               underline == o.underline;
+    }
+    bool operator!=(const TextStyle& o) const { return !(*this == o); }
+};
+
+// A piece of text with one look. One text object can hold many pieces: bold, then normal, and so on.
+struct TextRun {
+    std::wstring text;
+    TextStyle style;
+    COLORREF color = 0;
+};
+
+// Part of a drawn object rubbed out with the partial eraser (like in Paint).
+struct Erasure {
+    std::vector<Pt> points;
+    float width = 10;
 };
 
 // One drawn object. Coordinates are in monitor pixels.
 struct Shape {
     Tool tool = Tool::Pencil;
     COLORREF color = 0;
-    int size = 1;                 // 0 = thin, 1 = medium, 2 = thick
-    std::vector<POINT> points;    // freehand: the path; arrow/rect/ellipse: start and end; text: origin
-    std::wstring text;
-    TextStyle style;              // text only
+    int size = 1;                  // 0 = thin, 1 = medium, 2 = thick
+    std::vector<Pt> points;        // freehand: the path; arrow/rect/ellipse: start and end; text: top-left
+    std::vector<TextRun> runs;     // text only
+    std::vector<Erasure> erasures; // rubbed-out parts
 };
 
 void StartGraphics();
 void StopGraphics();
 
-// Line width in pixels for a tool and size level.
 float StrokeWidth(Tool tool, int size, float scale);
-
-// Radius of the eraser circle.
 float EraserRadius(int size, float scale);
-
-// Text heights for the three size buttons.
 float TextPresetPx(int size, float scale);
 
-// Area that drawing this shape can touch (generous).
+bool IsTwoPointTool(Tool t);
+
+// Area that drawing this shape can touch (generous, for repainting).
 RECT ShapeBounds(const Shape& shape, float scale);
 
-// True if the eraser circle (center p, radius r) touches the shape.
-bool ShapeTouched(const Shape& shape, POINT p, float r, float scale);
+// Tight box around the shape (for the selection frame).
+RECT ShapeBox(const Shape& shape, float scale);
 
-// True if p is on the text (used to edit an existing text by clicking it).
-bool TextContains(const Shape& shape, POINT p, float scale);
+// Object eraser: true if the circle (center p, radius r) touches the shape.
+bool ShapeTouched(const Shape& shape, Pt p, float r, float scale);
+
+// Selection tool: true if a click at p picks this shape.
+bool ShapeHit(const Shape& shape, Pt p, float scale);
+
+void MoveShape(Shape& shape, float dx, float dy);
+
+// Scales a copy of the original shape around anchor a. Text keeps its proportions (uses sy).
+void ScaleShape(Shape& shape, const Shape& original, Pt a, float sx, float sy);
+
+// Text cursor shown at the end of the text being typed, in the look the next letters will have.
+struct Caret {
+    const Shape* shape = nullptr;
+    TextStyle style;
+    COLORREF color = 0;
+};
 
 // Draws shapes onto dc, limited to clip. offset is subtracted from every coordinate.
-// If caret is true, a text cursor is drawn at the end of the last shape (text being typed).
-void DrawShapes(HDC dc, const RECT& clip, POINT offset, const std::vector<const Shape*>& shapes, bool caret,
+void DrawShapes(HDC dc, const RECT& clip, POINT offset, const std::vector<const Shape*>& shapes, const Caret& caret,
                 float scale);

@@ -19,11 +19,14 @@ constexpr float kGap = 9.f;
 constexpr float kPad = 4.f;
 
 bool Visible(int id, const State& st) {
-    return (id < kBold || id > kFont) || st.tool == Tool::Text;
+    if (id >= kBold && id <= kFont) return st.tool == Tool::Text;
+    if (id == kEraseWhole || id == kErasePart) return st.tool == Tool::Eraser;
+    return true;
 }
 
 bool GroupEndsAfter(int id) {
-    return id == kFirstColor - 1 || id == kCustomColor || id == kBold - 1 || id == kFont || id == kRedo;
+    return id == kFirstColor - 1 || id == kCustomColor || id == kEraseWhole - 1 || id == kErasePart ||
+           id == kFont || id == kRedo;
 }
 
 int Px(float v, float scale) { return static_cast<int>(std::lround(v * scale)); }
@@ -128,6 +131,35 @@ void IconClose(G::Graphics& g, const G::RectF& r, const G::Color& fg, float s) {
     g.DrawLine(&pen, r.GetRight() - 10 * s, r.Y + 10 * s, r.X + 10 * s, r.GetBottom() - 10 * s);
 }
 
+// Mouse pointer: pick, move and resize drawn objects.
+void IconSelect(G::Graphics& g, const G::RectF& r, const G::Color& fg, float s) {
+    const float x = r.X + 11 * s, y = r.Y + 7 * s;
+    G::PointF pts[] = {{x, y}, {x, y + 17 * s}, {x + 4.5f * s, y + 13 * s}, {x + 7.5f * s, y + 19 * s},
+                       {x + 10 * s, y + 18 * s}, {x + 7 * s, y + 12 * s}, {x + 12 * s, y + 12 * s}};
+    G::SolidBrush brush(fg);
+    g.FillPolygon(&brush, pts, 7);
+}
+
+// Whole objects: a figure with a cross over it.
+void IconEraseWhole(G::Graphics& g, const G::RectF& r, const G::Color& fg, float s) {
+    G::Pen pen(fg, 1.5f * s);
+    g.DrawEllipse(&pen, r.X + 8 * s, r.Y + 8 * s, r.Width - 16 * s, r.Height - 16 * s);
+    G::Pen cross(fg, 2.f * s);
+    cross.SetLineCap(G::LineCapRound, G::LineCapRound, G::DashCapRound);
+    g.DrawLine(&cross, r.X + 7 * s, r.Y + 7 * s, r.GetRight() - 7 * s, r.GetBottom() - 7 * s);
+}
+
+// Part of a line rubbed out: a broken line with the eraser circle in the gap.
+void IconErasePart(G::Graphics& g, const G::RectF& r, const G::Color& fg, float s) {
+    G::Pen pen(fg, 3.f * s);
+    pen.SetLineCap(G::LineCapRound, G::LineCapRound, G::DashCapRound);
+    const float cy = r.Y + r.Height / 2, cx = r.X + r.Width / 2;
+    g.DrawLine(&pen, r.X + 6 * s, cy, cx - 6 * s, cy);
+    g.DrawLine(&pen, cx + 6 * s, cy, r.GetRight() - 6 * s, cy);
+    G::Pen ring(fg, 1.2f * s);
+    g.DrawEllipse(&ring, cx - 5 * s, cy - 5 * s, 10 * s, 10 * s);
+}
+
 // B, I, S and Aa for the text buttons, drawn with a real font.
 void IconLetters(G::Graphics& g, const G::RectF& r, const G::Color& fg, float s, int id) {
     G::FontFamily segoe(L"Segoe UI");
@@ -220,7 +252,8 @@ void Draw(HDC dc, const RECT& panel, const State& st, float s) {
         const bool active = (id < kFirstColor && id == static_cast<int>(st.tool)) ||
                             (id >= kFirstSize && id < kBold && id - kFirstSize == st.size) ||
                             (id == kBold && st.bold) || (id == kItalic && st.italic) ||
-                            (id == kStrike && st.strike);
+                            (id == kStrike && st.strike) || (id == kEraseWhole && !st.eraseParts) ||
+                            (id == kErasePart && st.eraseParts);
         if (active || id == st.hover) {
             G::SolidBrush hl(active ? Argb(accent, st.dark ? 150 : 60) : Argb(fgRgb, 30));
             g.FillRectangle(&hl, r.X + 2 * s, r.Y + 2 * s, r.Width - 4 * s, r.Height - 4 * s);
@@ -255,7 +288,7 @@ void Draw(HDC dc, const RECT& panel, const State& st, float s) {
             }
             continue;
         }
-        if (id >= kFirstSize && id < kBold) {
+        if (id >= kFirstSize && id < kEraseWhole) {
             static const float kDots[kSizeCount] = {4.f, 8.f, 13.f};
             const float d = kDots[id - kFirstSize] * s;
             G::SolidBrush dot(fg);
@@ -268,6 +301,9 @@ void Draw(HDC dc, const RECT& panel, const State& st, float s) {
         }
         switch (id) {
             case static_cast<int>(Tool::Area): IconArea(g, r, color, s); break;
+            case static_cast<int>(Tool::Select): IconSelect(g, r, color, s); break;
+            case kEraseWhole: IconEraseWhole(g, r, color, s); break;
+            case kErasePart: IconErasePart(g, r, color, s); break;
             case static_cast<int>(Tool::Pencil): IconPencil(g, r, color, s); break;
             case static_cast<int>(Tool::Marker): IconStroke(g, r, Argb(RGB(255, 200, 0), 200), 7 * s, s); break;
             case static_cast<int>(Tool::Brush): IconStroke(g, r, color, 6 * s, s); break;
@@ -295,13 +331,16 @@ void Draw(HDC dc, const RECT& panel, const State& st, float s) {
 const wchar_t* Tip(int id) {
     if (id >= kFirstColor && id < kCustomColor) return T(Str::TipColor);
     if (id == kCustomColor) return T(Str::TipCustomColor);
-    if (id >= kFirstSize && id < kBold) return T(Str::TipSize);
+    if (id >= kFirstSize && id < kEraseWhole) return T(Str::TipSize);
+    if (id == kEraseWhole) return T(Str::TipEraseWhole);
+    if (id == kErasePart) return T(Str::TipErasePart);
     if (id == kBold) return T(Str::TipBold);
     if (id == kItalic) return T(Str::TipItalic);
     if (id == kStrike) return T(Str::TipStrike);
     if (id == kFont) return T(Str::TipFont);
     switch (id) {
         case static_cast<int>(Tool::Area): return T(Str::TipArea);
+        case static_cast<int>(Tool::Select): return T(Str::TipSelect);
         case static_cast<int>(Tool::Pencil): return T(Str::TipPencil);
         case static_cast<int>(Tool::Marker): return T(Str::TipMarker);
         case static_cast<int>(Tool::Brush): return T(Str::TipBrush);
