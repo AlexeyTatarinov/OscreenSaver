@@ -9,6 +9,8 @@ if(MSVC)
     set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
     add_compile_options(/W4 /utf-8 /permissive-)
     add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
+    # The manifest is embedded from res/app.rc; stop the linker from adding a second one.
+    add_link_options(/MANIFEST:NO)
 else()
     add_compile_options(-Wall -Wextra -Wno-missing-field-initializers -finput-charset=UTF-8)
     add_link_options(-static -municode -mwindows)
