@@ -10,6 +10,11 @@ enum class Str {
     MenuExit,
     AlreadyRunning,
     HookFailed,
+    HintSelect,
+    HintPickMonitor,
+    SavedTitle,
+    SavedText,
+    SaveFailed,
 };
 
 void InitLanguage();

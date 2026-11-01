@@ -2,20 +2,28 @@
 
 #include <windows.h>
 
-// A frozen copy of one monitor's image.
+#include <cstdint>
+#include <vector>
+
+// A frozen copy of one monitor's image, stored as 32-bit pixels (BGRX, top-down).
 struct Snapshot {
     HBITMAP bitmap = nullptr;
-    RECT bounds = {};  // monitor rectangle in virtual-screen pixels
+    uint32_t* pixels = nullptr;  // owned by bitmap
+    RECT bounds = {};            // monitor rectangle in virtual-screen pixels
 
     int Width() const { return bounds.right - bounds.left; }
     int Height() const { return bounds.bottom - bounds.top; }
 };
 
-// Monitor under the mouse cursor. If the cursor is not on any monitor, returns nullptr
-// (later stages show the monitor picker in that case).
+// Monitor under the mouse cursor, or nullptr if the cursor is not on any monitor.
 HMONITOR MonitorUnderCursor();
 
-// Copies the current image of the monitor. The caller owns snapshot.bitmap.
+std::vector<HMONITOR> AllMonitors();
+
+// Copies the current image of the monitor. Free with FreeSnapshot.
 bool CaptureMonitor(HMONITOR monitor, Snapshot& out);
+
+// Makes a darkened grey copy used as the mask around the selected area.
+bool MakeDimmedCopy(const Snapshot& source, Snapshot& out);
 
 void FreeSnapshot(Snapshot& snapshot);

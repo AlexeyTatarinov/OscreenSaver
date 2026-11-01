@@ -22,9 +22,10 @@ add_executable(OscreenSaver WIN32
     src/main.cpp
     src/capture.cpp
     src/overlay.cpp
+    src/save.cpp
     src/autostart.cpp
     src/i18n.cpp
     res/app.rc
 )
 
-target_link_libraries(OscreenSaver PRIVATE user32 gdi32 shell32 advapi32 shcore)
+target_link_libraries(OscreenSaver PRIVATE user32 gdi32 shell32 advapi32 shcore ole32 oleaut32 windowscodecs uuid)

@@ -26,6 +26,21 @@ const wchar_t* const kStrings[][3] = {
     /* HookFailed */     {L"Could not register the PrintScreen key.",
                           L"Не удалось подключить клавишу PrintScreen.",
                           L"Не вдалося підключити клавішу PrintScreen."},
+    /* HintSelect */     {L"Select an area with the mouse  •  Enter — save  •  Esc — cancel",
+                          L"Выделите область мышью  •  Enter — сохранить  •  Esc — отмена",
+                          L"Виділіть область мишею  •  Enter — зберегти  •  Esc — скасувати"},
+    /* HintPickMonitor */{L"Right-click to choose this monitor",
+                          L"Нажмите правую кнопку мыши, чтобы выбрать этот монитор",
+                          L"Натисніть праву кнопку миші, щоб вибрати цей монітор"},
+    /* SavedTitle */     {L"Screenshot saved and copied",
+                          L"Снимок сохранён и скопирован",
+                          L"Знімок збережено та скопійовано"},
+    /* SavedText */      {L"Click to open the folder.",
+                          L"Нажмите, чтобы открыть папку.",
+                          L"Натисніть, щоб відкрити теку."},
+    /* SaveFailed */     {L"Could not save the screenshot.",
+                          L"Не удалось сохранить снимок.",
+                          L"Не вдалося зберегти знімок."},
 };
 
 }  // namespace
