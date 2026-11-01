@@ -49,13 +49,18 @@ const wchar_t* const kStrings[][3] = {
     /* TipRect */ {L"Rectangle", L"Прямоугольник", L"Прямокутник"},
     /* TipEllipse */ {L"Ellipse", L"Эллипс", L"Еліпс"},
     /* TipText */ {L"Text", L"Текст", L"Текст"},
-    /* TipEraser */ {L"Eraser", L"Ластик", L"Гумка"},
+    /* TipEraser */ {L"Eraser: removes what you drew", L"Ластик: стирает нарисованное", L"Гумка: стирає намальоване"},
     /* TipColor */ {L"Colour", L"Цвет", L"Колір"},
     /* TipSize */ {L"Line size", L"Толщина", L"Товщина"},
     /* TipUndo */ {L"Undo (Ctrl+Z)", L"Отменить (Ctrl+Z)", L"Скасувати (Ctrl+Z)"},
     /* TipRedo */ {L"Redo (Ctrl+Y)", L"Вернуть (Ctrl+Y)", L"Повернути (Ctrl+Y)"},
     /* TipSave */ {L"Save and copy (Enter)", L"Сохранить и скопировать (Enter)", L"Зберегти та скопіювати (Enter)"},
     /* TipClose */ {L"Close without saving (Esc)", L"Закрыть без сохранения (Esc)", L"Закрити без збереження (Esc)"},
+    /* TipCustomColor */ {L"Any colour…", L"Другой цвет…", L"Інший колір…"},
+    /* TipBold */ {L"Bold (Ctrl+B)", L"Жирный (Ctrl+B)", L"Жирний (Ctrl+B)"},
+    /* TipItalic */ {L"Italic (Ctrl+I)", L"Курсив (Ctrl+I)", L"Курсив (Ctrl+I)"},
+    /* TipStrike */ {L"Strikethrough", L"Зачёркнутый", L"Закреслений"},
+    /* TipFont */ {L"Font and size…", L"Шрифт и размер…", L"Шрифт і розмір…"},
 };
 
 }  // namespace

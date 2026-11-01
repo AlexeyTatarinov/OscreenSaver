@@ -18,18 +18,29 @@ constexpr float kButton = 32.f;
 constexpr float kGap = 9.f;
 constexpr float kPad = 4.f;
 
+bool Visible(int id, const State& st) {
+    return (id < kBold || id > kFont) || st.tool == Tool::Text;
+}
+
 bool GroupEndsAfter(int id) {
-    return id == kFirstColor - 1 || id == kFirstSize - 1 || id == kUndo - 1 || id == kRedo;
+    return id == kFirstColor - 1 || id == kCustomColor || id == kBold - 1 || id == kFont || id == kRedo;
 }
 
 int Px(float v, float scale) { return static_cast<int>(std::lround(v * scale)); }
 
-int PanelWidth(float scale) {
-    float w = kPad * 2 + kButton * kButtonCount;
-    for (int id = 0; id < kButtonCount; ++id) {
-        if (GroupEndsAfter(id)) w += kGap;
+// Left offset of a button inside the panel, in unscaled points. Hidden buttons take no room.
+float Offset(int id, const State& st) {
+    float x = kPad;
+    for (int i = 0; i < id; ++i) {
+        if (!Visible(i, st)) continue;
+        x += kButton;
+        if (GroupEndsAfter(i)) x += kGap;
     }
-    return Px(w, scale);
+    return x;
+}
+
+int PanelWidth(float scale, const State& st) {
+    return Px(Offset(kButtonCount, st) - kGap + kPad, scale);
 }
 
 int PanelHeight(float scale) { return Px(kButton + kPad * 2, scale); }
@@ -117,10 +128,29 @@ void IconClose(G::Graphics& g, const G::RectF& r, const G::Color& fg, float s) {
     g.DrawLine(&pen, r.GetRight() - 10 * s, r.Y + 10 * s, r.X + 10 * s, r.GetBottom() - 10 * s);
 }
 
+// B, I, S and Aa for the text buttons, drawn with a real font.
+void IconLetters(G::Graphics& g, const G::RectF& r, const G::Color& fg, float s, int id) {
+    G::FontFamily segoe(L"Segoe UI");
+    const G::FontFamily* family = segoe.IsAvailable() ? &segoe : G::FontFamily::GenericSansSerif();
+    INT style = G::FontStyleRegular;
+    const wchar_t* text = L"Aa";
+    if (id == kBold) { style = G::FontStyleBold; text = L"B"; }
+    if (id == kItalic) { style = G::FontStyleItalic | G::FontStyleBold; text = L"I"; }
+    if (id == kStrike) { style = G::FontStyleStrikeout; text = L"S"; }
+    if (!family->IsStyleAvailable(style)) style = G::FontStyleRegular;
+    G::Font font(family, 15.f * s, style, G::UnitPixel);
+    G::StringFormat fmt;
+    fmt.SetAlignment(G::StringAlignmentCenter);
+    fmt.SetLineAlignment(G::StringAlignmentCenter);
+    G::SolidBrush brush(fg);
+    g.SetTextRenderingHint(G::TextRenderingHintAntiAlias);
+    g.DrawString(text, -1, &font, r, &fmt, &brush);
+}
+
 }  // namespace
 
-RECT Place(const RECT& sel, const RECT& screen, float scale) {
-    const int w = PanelWidth(scale);
+RECT Place(const RECT& sel, const RECT& screen, float scale, const State& st) {
+    const int w = PanelWidth(scale, st);
     const int h = PanelHeight(scale);
     const int gap = Px(6, scale);
     int left = std::max<int>(sel.right - w, screen.left);  // aligned to the right edge of the selection
@@ -137,21 +167,17 @@ RECT Place(const RECT& sel, const RECT& screen, float scale) {
     return RECT{left, top, left + w, top + h};
 }
 
-RECT ButtonRect(const RECT& panel, int id, float scale) {
-    float x = kPad;
-    for (int i = 0; i < id; ++i) {
-        x += kButton;
-        if (GroupEndsAfter(i)) x += kGap;
-    }
-    const int left = panel.left + Px(x, scale);
+RECT ButtonRect(const RECT& panel, int id, float scale, const State& st) {
+    const int left = panel.left + Px(Offset(id, st), scale);
     const int top = panel.top + Px(kPad, scale);
     return RECT{left, top, left + Px(kButton, scale), top + Px(kButton, scale)};
 }
 
-int HitTest(const RECT& panel, POINT p, float scale) {
+int HitTest(const RECT& panel, POINT p, float scale, const State& st) {
     if (!PtInRect(&panel, p)) return kNone;
     for (int id = 0; id < kButtonCount; ++id) {
-        const RECT r = ButtonRect(panel, id, scale);
+        if (!Visible(id, st)) continue;
+        const RECT r = ButtonRect(panel, id, scale, st);
         if (PtInRect(&r, p)) return id;
     }
     return kNone;
@@ -187,23 +213,40 @@ void Draw(HDC dc, const RECT& panel, const State& st, float s) {
     }
 
     for (int id = 0; id < kButtonCount; ++id) {
-        const RECT br = ButtonRect(panel, id, s);
+        if (!Visible(id, st)) continue;
+        const RECT br = ButtonRect(panel, id, s, st);
         const G::RectF r(static_cast<float>(br.left), static_cast<float>(br.top),
                          static_cast<float>(br.right - br.left), static_cast<float>(br.bottom - br.top));
         const bool active = (id < kFirstColor && id == static_cast<int>(st.tool)) ||
-                            (id >= kFirstSize && id < kUndo && id - kFirstSize == st.size);
+                            (id >= kFirstSize && id < kBold && id - kFirstSize == st.size) ||
+                            (id == kBold && st.bold) || (id == kItalic && st.italic) ||
+                            (id == kStrike && st.strike);
         if (active || id == st.hover) {
             G::SolidBrush hl(active ? Argb(accent, st.dark ? 150 : 60) : Argb(fgRgb, 30));
             g.FillRectangle(&hl, r.X + 2 * s, r.Y + 2 * s, r.Width - 4 * s, r.Height - 4 * s);
         }
         const G::Color& color = ((id == kUndo && !st.canUndo) || (id == kRedo && !st.canRedo)) ? fgDisabled : fg;
 
-        if (id >= kFirstColor && id < kFirstSize) {
+        if (id >= kFirstColor && id <= kCustomColor) {
             const int c = id - kFirstColor;
             const float d = 16 * s;
             const float x = r.X + (r.Width - d) / 2, y = r.Y + (r.Height - d) / 2;
-            G::SolidBrush swatch(Argb(kPalette[c]));
-            g.FillEllipse(&swatch, x, y, d, d);
+            if (id == kCustomColor) {
+                // Colour wheel: opens the window with all colours. Shows the colour picked there.
+                static const COLORREF kWheel[6] = {RGB(232, 17, 35), RGB(255, 200, 0), RGB(16, 176, 64),
+                                                   RGB(0, 190, 220), RGB(0, 90, 215), RGB(160, 40, 200)};
+                for (int k = 0; k < 6; ++k) {
+                    G::SolidBrush part(Argb(kWheel[k]));
+                    g.FillPie(&part, x, y, d, d, -90.f + k * 60.f, 60.f);
+                }
+                if (st.hasCustom) {
+                    G::SolidBrush inner(Argb(st.customColor));
+                    g.FillEllipse(&inner, x + d / 4, y + d / 4, d / 2, d / 2);
+                }
+            } else {
+                G::SolidBrush swatch(Argb(kPalette[c]));
+                g.FillEllipse(&swatch, x, y, d, d);
+            }
             G::Pen edge(Argb(fgRgb, 90), 1.f);
             g.DrawEllipse(&edge, x, y, d, d);
             if (c == st.color) {
@@ -212,17 +255,21 @@ void Draw(HDC dc, const RECT& panel, const State& st, float s) {
             }
             continue;
         }
-        if (id >= kFirstSize && id < kUndo) {
+        if (id >= kFirstSize && id < kBold) {
             static const float kDots[kSizeCount] = {4.f, 8.f, 13.f};
             const float d = kDots[id - kFirstSize] * s;
             G::SolidBrush dot(fg);
             g.FillEllipse(&dot, r.X + (r.Width - d) / 2, r.Y + (r.Height - d) / 2, d, d);
             continue;
         }
+        if (id >= kBold && id <= kFont) {
+            IconLetters(g, r, color, s, id);
+            continue;
+        }
         switch (id) {
             case static_cast<int>(Tool::Area): IconArea(g, r, color, s); break;
             case static_cast<int>(Tool::Pencil): IconPencil(g, r, color, s); break;
-            case static_cast<int>(Tool::Marker): IconStroke(g, r, Argb(kPalette[1], 200), 7 * s, s); break;
+            case static_cast<int>(Tool::Marker): IconStroke(g, r, Argb(RGB(255, 200, 0), 200), 7 * s, s); break;
             case static_cast<int>(Tool::Brush): IconStroke(g, r, color, 6 * s, s); break;
             case static_cast<int>(Tool::Arrow): IconArrow(g, r, color, s); break;
             case static_cast<int>(Tool::Rect): {
@@ -246,8 +293,13 @@ void Draw(HDC dc, const RECT& panel, const State& st, float s) {
 }
 
 const wchar_t* Tip(int id) {
-    if (id >= kFirstColor && id < kFirstSize) return T(Str::TipColor);
-    if (id >= kFirstSize && id < kUndo) return T(Str::TipSize);
+    if (id >= kFirstColor && id < kCustomColor) return T(Str::TipColor);
+    if (id == kCustomColor) return T(Str::TipCustomColor);
+    if (id >= kFirstSize && id < kBold) return T(Str::TipSize);
+    if (id == kBold) return T(Str::TipBold);
+    if (id == kItalic) return T(Str::TipItalic);
+    if (id == kStrike) return T(Str::TipStrike);
+    if (id == kFont) return T(Str::TipFont);
     switch (id) {
         case static_cast<int>(Tool::Area): return T(Str::TipArea);
         case static_cast<int>(Tool::Pencil): return T(Str::TipPencil);

@@ -30,4 +30,4 @@ add_executable(OscreenSaver WIN32
     res/app.rc
 )
 
-target_link_libraries(OscreenSaver PRIVATE user32 gdi32 shell32 advapi32 shcore ole32 oleaut32 windowscodecs uuid gdiplus)
+target_link_libraries(OscreenSaver PRIVATE user32 gdi32 shell32 advapi32 shcore ole32 oleaut32 windowscodecs uuid gdiplus comdlg32)
