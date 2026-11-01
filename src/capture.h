@@ -23,6 +23,9 @@ std::vector<HMONITOR> AllMonitors();
 // Copies the current image of the monitor. Free with FreeSnapshot.
 bool CaptureMonitor(HMONITOR monitor, Snapshot& out);
 
+// Empty picture of the given size (used to compose the final image).
+bool CreateBlankSnapshot(int width, int height, Snapshot& out);
+
 // Makes a darkened grey copy used as the mask around the selected area.
 bool MakeDimmedCopy(const Snapshot& source, Snapshot& out);
 

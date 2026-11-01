@@ -15,6 +15,8 @@ enum class Str {
     SavedTitle,
     SavedText,
     SaveFailed,
+    TipArea, TipPencil, TipMarker, TipBrush, TipArrow, TipRect, TipEllipse, TipText, TipEraser,
+    TipColor, TipSize, TipUndo, TipRedo, TipSave, TipClose,
 };
 
 void InitLanguage();

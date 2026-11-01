@@ -41,6 +41,21 @@ const wchar_t* const kStrings[][3] = {
     /* SaveFailed */     {L"Could not save the screenshot.",
                           L"Не удалось сохранить снимок.",
                           L"Не вдалося зберегти знімок."},
+    /* TipArea */ {L"Select area (Tab)", L"Выделение области (Tab)", L"Виділення області (Tab)"},
+    /* TipPencil */ {L"Pencil (Tab)", L"Карандаш (Tab)", L"Олівець (Tab)"},
+    /* TipMarker */ {L"Marker", L"Маркер", L"Маркер"},
+    /* TipBrush */ {L"Brush", L"Кисть", L"Пензель"},
+    /* TipArrow */ {L"Arrow", L"Стрелка", L"Стрілка"},
+    /* TipRect */ {L"Rectangle", L"Прямоугольник", L"Прямокутник"},
+    /* TipEllipse */ {L"Ellipse", L"Эллипс", L"Еліпс"},
+    /* TipText */ {L"Text", L"Текст", L"Текст"},
+    /* TipEraser */ {L"Eraser", L"Ластик", L"Гумка"},
+    /* TipColor */ {L"Colour", L"Цвет", L"Колір"},
+    /* TipSize */ {L"Line size", L"Толщина", L"Товщина"},
+    /* TipUndo */ {L"Undo (Ctrl+Z)", L"Отменить (Ctrl+Z)", L"Скасувати (Ctrl+Z)"},
+    /* TipRedo */ {L"Redo (Ctrl+Y)", L"Вернуть (Ctrl+Y)", L"Повернути (Ctrl+Y)"},
+    /* TipSave */ {L"Save and copy (Enter)", L"Сохранить и скопировать (Enter)", L"Зберегти та скопіювати (Enter)"},
+    /* TipClose */ {L"Close without saving (Esc)", L"Закрыть без сохранения (Esc)", L"Закрити без збереження (Esc)"},
 };
 
 }  // namespace

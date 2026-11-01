@@ -10,6 +10,7 @@
 
 #include <string>
 
+#include "annotate.h"
 #include "app.h"
 #include "autostart.h"
 #include "i18n.h"
@@ -46,7 +47,7 @@ LRESULT CALLBACK KeyboardHook(int code, WPARAM wp, LPARAM lp) {
             }
             return 1;  // swallow both key-down and key-up
         }
-        if ((key->vkCode == VK_ESCAPE || key->vkCode == VK_RETURN) && IsOverlayOpen()) {
+        if ((key->vkCode == VK_ESCAPE || key->vkCode == VK_RETURN) && IsOverlayOpen() && !IsOverlayTyping()) {
             if (down) {
                 PostMessageW(g_main, WM_APP_OVERLAY_KEY, key->vkCode, 0);
             }
@@ -166,6 +167,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
 
     ApplyFirstRunAutostart();
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);  // needed for JPG encoding
+    StartGraphics();                                    // smooth (anti-aliased) drawing
 
     WNDCLASSEXW wc = {sizeof(wc)};
     wc.lpfnWndProc = MainProc;
@@ -195,6 +197,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     }
 
     if (g_keyboardHook) UnhookWindowsHookEx(g_keyboardHook);
+    StopGraphics();
     CoUninitialize();
     if (mutex) {
         ReleaseMutex(mutex);

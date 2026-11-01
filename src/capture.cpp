@@ -68,6 +68,11 @@ bool CaptureMonitor(HMONITOR monitor, Snapshot& out) {
     return ok;
 }
 
+bool CreateBlankSnapshot(int width, int height, Snapshot& out) {
+    out.bounds = RECT{0, 0, width, height};
+    return CreatePixelBitmap(width, height, out);
+}
+
 bool MakeDimmedCopy(const Snapshot& source, Snapshot& out) {
     if (!CreatePixelBitmap(source.Width(), source.Height(), out)) {
         return false;
