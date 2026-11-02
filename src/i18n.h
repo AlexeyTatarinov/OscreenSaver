@@ -20,6 +20,7 @@ enum class Str {
     TipCustomColor, TipBold, TipItalic, TipStrike, TipFont,
     TipSelect, TipEraseWhole, TipErasePart,
     TipBlur, TipAddArea, HintNextArea,
+    TipFrames,
 };
 
 void InitLanguage();

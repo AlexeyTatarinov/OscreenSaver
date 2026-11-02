@@ -22,9 +22,6 @@ namespace {
 
 const wchar_t kOverlayClass[] = L"OscreenSaver.Overlay";
 
-const COLORREF kAccent = RGB(0, 120, 215);
-const COLORREF kLabelBack = RGB(32, 32, 32);
-const COLORREF kLabelText = RGB(255, 255, 255);
 constexpr float kPanelSize = 0.8f;  // panel buttons are 80% of their original size
 
 // Handles around a frame: 0..7 clockwise from top-left. 8 = inside. -1 = outside.
@@ -41,6 +38,7 @@ struct Settings {
     TextStyle text;  // px stored at 100% screen scale
     int textSize = 1;
     bool eraseParts = false;
+    bool frames = true;  // thin grey frame around each part of a joined picture
 };
 Settings g_settings;
 bool g_dialogOpen = false;  // colour or font window is open: Esc/Enter belong to it
@@ -101,6 +99,7 @@ struct Overlay {
     POINT mouse = {-10000, -10000};
     int hover = toolbar::kNone;
     bool dark = true;
+    COLORREF accent = RGB(0, 120, 215);  // Windows accent colour: frames, handles, numbers
 
     HDC backDc = nullptr;  // off-screen buffer: draws without flicker
     HBITMAP backBitmap = nullptr;
@@ -240,8 +239,8 @@ RECT ResizeByHandle(const RECT& r0, int handle, LONG dx, LONG dy) {
 RECT TextBox(const Overlay& o, const wchar_t* text, const RECT& anchor, bool centered) {
     SIZE size = {0, 0};
     GetTextExtentPoint32W(o.backDc, text, static_cast<int>(wcslen(text)), &size);
-    const int w = size.cx + Scaled(o, 8) * 2;
-    const int h = size.cy + Scaled(o, 4) * 2;
+    const int w = size.cx + static_cast<int>(10 * o.scale) * 2;
+    const int h = size.cy + static_cast<int>(5 * o.scale) * 2;
     if (centered) {
         const int cx = (anchor.left + anchor.right) / 2;
         const int cy = (anchor.top + anchor.bottom) / 2;
@@ -253,14 +252,8 @@ RECT TextBox(const Overlay& o, const wchar_t* text, const RECT& anchor, bool cen
     return RECT{anchor.left, top, anchor.left + w, top + h};
 }
 
-void DrawTextBox(HDC dc, const wchar_t* text, const RECT& box) {
-    HBRUSH back = CreateSolidBrush(kLabelBack);
-    FillRect(dc, &box, back);
-    DeleteObject(back);
-    SetBkMode(dc, TRANSPARENT);
-    SetTextColor(dc, kLabelText);
-    RECT r = box;
-    DrawTextW(dc, text, -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+void DrawTextBox(const Overlay& o, HDC dc, const wchar_t* text, const RECT& box) {
+    toolbar::DrawLabel(dc, box, text, o.dark, o.scale);
 }
 
 std::wstring SizeText(const Overlay& o) {
@@ -293,6 +286,8 @@ toolbar::State PanelState(const Overlay& o) {
     st.canUndo = !o.undo.empty();
     st.canRedo = !o.redo.empty();
     st.canAddArea = o.hasSelection && AreaCount() < kMaxAreas;
+    st.compare = CompareMode();
+    st.frames = g_settings.frames;
     st.hover = o.hover;
     st.dark = o.dark;
     return st;
@@ -910,7 +905,7 @@ BlurSource BlurOf(Overlay& o) {
 
 void DrawFrame(const Overlay& o, HDC dc) {
     const RECT& s = o.selection;
-    HPEN pen = CreatePen(PS_SOLID, Scaled(o, 1), kAccent);
+    HPEN pen = CreatePen(PS_SOLID, Scaled(o, 1), o.accent);
     HGDIOBJ oldPen = SelectObject(dc, pen);
     HGDIOBJ oldBrush = SelectObject(dc, GetStockObject(NULL_BRUSH));
     Rectangle(dc, s.left, s.top, s.right, s.bottom);
@@ -933,7 +928,7 @@ void DrawBadge(const Overlay& o, HDC dc, const RECT& area, int number) {
     const int d = Scaled(o, 18);
     const RECT box = {area.left + Scaled(o, 4), area.top + Scaled(o, 4), area.left + Scaled(o, 4) + d,
                       area.top + Scaled(o, 4) + d};
-    HBRUSH brush = CreateSolidBrush(kAccent);
+    HBRUSH brush = CreateSolidBrush(o.accent);
     HGDIOBJ oldBrush = SelectObject(dc, brush);
     HGDIOBJ oldPen = SelectObject(dc, GetStockObject(NULL_PEN));
     Ellipse(dc, box.left, box.top, box.right + 1, box.bottom + 1);
@@ -950,7 +945,7 @@ void DrawBadge(const Overlay& o, HDC dc, const RECT& area, int number) {
 
 // A kept area: solid frame and its number.
 void DrawPieceFrame(const Overlay& o, HDC dc, const RECT& a) {
-    HPEN pen = CreatePen(PS_SOLID, Scaled(o, 2), kAccent);
+    HPEN pen = CreatePen(PS_SOLID, Scaled(o, 2), o.accent);
     HGDIOBJ oldPen = SelectObject(dc, pen);
     HGDIOBJ oldBrush = SelectObject(dc, GetStockObject(NULL_BRUSH));
     Rectangle(dc, a.left, a.top, a.right, a.bottom);
@@ -963,13 +958,13 @@ void DrawPieceFrame(const Overlay& o, HDC dc, const RECT& a) {
 void DrawPickFrame(const Overlay& o, HDC dc) {
     const RECT f = PickFrame(o);
     if (IsRectEmpty(&f)) return;
-    HPEN dash = CreatePen(PS_DOT, 1, kAccent);
+    HPEN dash = CreatePen(PS_DOT, 1, o.accent);
     HGDIOBJ oldPen = SelectObject(dc, dash);
     HGDIOBJ oldBrush = SelectObject(dc, GetStockObject(NULL_BRUSH));
     SetBkMode(dc, OPAQUE);
     SetBkColor(dc, RGB(255, 255, 255));
     Rectangle(dc, f.left, f.top, f.right, f.bottom);
-    HPEN solid = CreatePen(PS_SOLID, Scaled(o, 1), kAccent);
+    HPEN solid = CreatePen(PS_SOLID, Scaled(o, 1), o.accent);
     SelectObject(dc, solid);
     SelectObject(dc, GetStockObject(WHITE_BRUSH));
     const int half = Scaled(o, 3);
@@ -1014,7 +1009,7 @@ void Paint(Overlay& o) {
 
     if (o.picking) {
         const wchar_t* hint = T(Str::HintPickMonitor);
-        DrawTextBox(o.backDc, hint, TextBox(o, hint, ClientRect(o), true));
+        DrawTextBox(o, o.backDc, hint, TextBox(o, hint, ClientRect(o), true));
     } else {
         // Clear picture and drawings in every area: the current selection and the kept ones.
         const BlurSource blur = BlurOf(o);
@@ -1035,16 +1030,16 @@ void Paint(Overlay& o) {
         if (EraserCircleVisible(o)) DrawEraserCircle(o, o.backDc);
         if (o.hasSelection && o.tool == Tool::Area) {
             const std::wstring size = SizeText(o);
-            DrawTextBox(o.backDc, size.c_str(), TextBox(o, size.c_str(), o.selection, false));
+            DrawTextBox(o, o.backDc, size.c_str(), TextBox(o, size.c_str(), o.selection, false));
         }
         if (!o.hasSelection) {
             const std::wstring hint = HintText();
-            DrawTextBox(o.backDc, hint.c_str(), TextBox(o, hint.c_str(), HintAnchor(o), true));
+            DrawTextBox(o, o.backDc, hint.c_str(), TextBox(o, hint.c_str(), HintAnchor(o), true));
         }
         if (PanelVisible(o)) {
             toolbar::Draw(o.backDc, PanelRect(o), PanelState(o), o.panelScale);
             if (o.hover != toolbar::kNone) {
-                DrawTextBox(o.backDc, toolbar::Tip(o.hover), TipBox(o));
+                DrawTextBox(o, o.backDc, toolbar::Tip(o.hover), TipBox(o));
             }
         }
     }
@@ -1136,6 +1131,19 @@ bool JoinPictures(std::vector<Snapshot>& parts, Snapshot& out) {
     return true;
 }
 
+// Thin grey frame around a part of a joined picture (inside its own edge, so parts stay touching).
+void AddFrame(Snapshot& part, int width) {
+    const int w = part.Width(), h = part.Height();
+    const uint32_t grey = 0x00A0A0A0u;
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            if (x < width || y < width || x >= w - width || y >= h - width) {
+                part.pixels[static_cast<size_t>(y) * w + x] = grey;
+            }
+        }
+    }
+}
+
 // Saves and copies the result of the whole session: one area, or up to four joined together.
 void FinishSession() {
     for (Overlay* o : g_overlays) CommitText(*o);
@@ -1148,7 +1156,10 @@ void FinishSession() {
     std::vector<Snapshot> parts;
     for (const Piece& a : areas) {
         Snapshot part;
-        if (ComposeArea(*a.owner, a.area, part)) parts.push_back(part);
+        if (ComposeArea(*a.owner, a.area, part)) {
+            if (areas.size() > 1 && g_settings.frames) AddFrame(part, std::max(1, a.owner->unit));
+            parts.push_back(part);
+        }
     }
     Snapshot result;
     bool ok = false;
@@ -1216,6 +1227,10 @@ void OnPanelClick(Overlay& o, int id) {
     else if (id == kUndo) Undo(o);
     else if (id == kRedo) Redo(o);
     else if (id == kAddArea) AddArea(o);
+    else if (id == kFrames) {
+        ChromeChange change(o);
+        g_settings.frames = !g_settings.frames;
+    }
     else if (id == kSave) Finish(o);
     else if (id == kClose) CloseAll();
 }
@@ -1566,6 +1581,7 @@ bool CreateOverlayWindow(HINSTANCE instance, HMONITOR monitor, bool picking) {
     auto* o = new Overlay;
     o->picking = picking;
     o->dark = toolbar::SystemUsesDarkTheme();
+    o->accent = toolbar::AccentColor();
     if (!CaptureMonitor(monitor, o->shot) || !MakeDimmedCopy(o->shot, o->dim)) {
         FreeOverlay(o);
         return false;

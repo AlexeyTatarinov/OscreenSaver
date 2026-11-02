@@ -67,6 +67,7 @@ const wchar_t* const kStrings[][3] = {
     /* TipBlur */ {L"Blur: drag over what to hide; size buttons = strength", L"Размытие: обведите то, что нужно скрыть; толщина = сила размытия", L"Розмиття: обведіть те, що треба приховати; товщина = сила розмиття"},
     /* TipAddArea */ {L"Add one more area: pictures are joined side by side (up to 4)", L"Добавить ещё область: картинки склеятся рядом (до 4)", L"Додати ще область: картинки склеяться поруч (до 4)"},
     /* HintNextArea */ {L"Select area %d of 4  \u2022  Enter \u2014 save  \u2022  Esc \u2014 cancel", L"Выделите область %d из 4  \u2022  Enter \u2014 сохранить  \u2022  Esc \u2014 отмена", L"Виділіть область %d з 4  \u2022  Enter \u2014 зберегти  \u2022  Esc \u2014 скасувати"},
+    /* TipFrames */ {L"Thin grey frame around each joined area: on / off", L"Тонкая серая рамка вокруг склеенных областей: вкл / выкл", L"Тонка сіра рамка навколо склеєних областей: увімк / вимк"},
 };
 
 }  // namespace

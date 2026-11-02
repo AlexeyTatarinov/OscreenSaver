@@ -20,7 +20,8 @@ constexpr int kFont = kStrike + 1;                        // opens the font wind
 constexpr int kUndo = kFont + 1;
 constexpr int kRedo = kUndo + 1;
 constexpr int kAddArea = kRedo + 1;                       // one more area for a side-by-side picture
-constexpr int kSave = kAddArea + 1;
+constexpr int kFrames = kAddArea + 1;                     // frames around joined areas on/off
+constexpr int kSave = kFrames + 1;
 constexpr int kClose = kSave + 1;
 constexpr int kButtonCount = kClose + 1;
 constexpr int kNone = -1;
@@ -38,6 +39,8 @@ struct State {
     bool canUndo = false;
     bool canRedo = false;
     bool canAddArea = false;
+    bool compare = false;  // several areas: the frame button is shown
+    bool frames = true;
     int hover = kNone;
     bool dark = true;
 };
@@ -55,5 +58,11 @@ const wchar_t* Tip(int id);
 
 // True if Windows apps use the dark theme.
 bool SystemUsesDarkTheme();
+
+// The accent colour chosen in Windows settings (Personalisation > Colours).
+COLORREF AccentColor();
+
+// Rounded label in the Windows style (hints, size of the selection, button tips).
+void DrawLabel(HDC dc, const RECT& box, const wchar_t* text, bool dark, float scale);
 
 }  // namespace toolbar

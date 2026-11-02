@@ -63,7 +63,11 @@ void AddTrayIcon() {
     nid.uID = kTrayId;
     nid.uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP;
     nid.uCallbackMessage = WM_APP_TRAY;
-    nid.hIcon = LoadIconW(nullptr, IDI_APPLICATION);  // TODO: own icon
+    // Own icon in the size Windows uses next to the clock.
+    static HICON icon = static_cast<HICON>(LoadImageW(g_instance, MAKEINTRESOURCEW(101), IMAGE_ICON,
+                                                      GetSystemMetrics(SM_CXSMICON),
+                                                      GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR));
+    nid.hIcon = icon ? icon : LoadIconW(nullptr, IDI_APPLICATION);
     lstrcpynW(nid.szTip, T(Str::TrayTooltip), ARRAYSIZE(nid.szTip));
     Shell_NotifyIconW(NIM_ADD, &nid);
 }
@@ -173,6 +177,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     wc.lpfnWndProc = MainProc;
     wc.hInstance = instance;
     wc.lpszClassName = kMainClass;
+    wc.hIcon = LoadIconW(instance, MAKEINTRESOURCEW(101));
     RegisterClassExW(&wc);
     RegisterOverlayClass(instance);
 
