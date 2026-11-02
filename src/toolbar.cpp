@@ -171,7 +171,7 @@ void IconBlur(G::Graphics& g, const Box& b, const G::Color& fg, float s) {
             const BYTE alpha = static_cast<BYTE>(((i + j) % 2) ? 230 : 110);
             G::SolidBrush dot(G::Color(alpha, fg.GetR(), fg.GetG(), fg.GetB()));
             const float d = 2.6f * s;
-            g.FillEllipse(&dot, b.X(4.5f + i * 3.5f) - d / 2, b.Y(6 + j * 4) - d / 2, d, d);
+            g.FillEllipse(&dot, b.X(4.5f + i * 3.5f) - d / 2, b.Y(6.f + j * 4.f) - d / 2, d, d);
         }
     }
 }
