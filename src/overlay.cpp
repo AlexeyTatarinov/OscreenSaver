@@ -52,6 +52,7 @@ struct Overlay {
     bool hasSelection = false;
     RECT selection = {};  // the screenshot area, in window pixels (= snapshot pixels)
     bool firstSelectionDone = false;
+    int selectionOrder = 1;  // number of the current selection among side-by-side areas
 
     // Area mode dragging.
     Drag drag = Drag::None;
@@ -59,6 +60,7 @@ struct Overlay {
     POINT dragStart = {};
     RECT selectionAtStart = {};
     bool moved = false;
+    bool creatingNew = false;  // side-by-side mode: this drag makes a new area
 
     // Current tool and options.
     Tool tool = Tool::Area;
@@ -122,6 +124,7 @@ std::vector<Overlay*> g_overlays;
 struct Piece {
     Overlay* owner;
     RECT area;
+    int order;  // number shown in the corner and position in the joined picture
 };
 std::vector<Piece> g_pieces;
 constexpr int kMaxAreas = 4;
@@ -186,10 +189,32 @@ bool InAnyArea(const Overlay& o, POINT p) {
 
 // Number shown in the corner of an area (1..4) in side-by-side mode.
 int PieceNumber(const Overlay& o, const RECT& r) {
-    for (size_t i = 0; i < g_pieces.size(); ++i) {
-        if (g_pieces[i].owner == &o && EqualRect(&g_pieces[i].area, &r)) return static_cast<int>(i) + 1;
+    for (const Piece& p : g_pieces) {
+        if (p.owner == &o && EqualRect(&p.area, &r)) return p.order;
     }
-    return static_cast<int>(g_pieces.size()) + 1;
+    return o.selectionOrder;
+}
+
+// Number for a new area: one more than the largest number in use.
+int NextOrder() {
+    int n = 0;
+    for (const Piece& p : g_pieces) n = std::max(n, p.order);
+    for (const Overlay* o : g_overlays) {
+        if (o->hasSelection) n = std::max(n, o->selectionOrder);
+    }
+    return n + 1;
+}
+
+// The active area (the one with handles) becomes a kept area again.
+void KeepSelection(Overlay& o);
+
+// Side-by-side mode: clicking a kept area makes it the active one, so it can be moved and resized.
+// The area that was active before is kept with its number.
+int KeptAreaAt(const Overlay& o, POINT p) {
+    for (size_t i = 0; i < g_pieces.size(); ++i) {
+        if (g_pieces[i].owner == &o && PtInRect(&g_pieces[i].area, p)) return static_cast<int>(i);
+    }
+    return -1;
 }
 
 // ---------- Geometry of everything drawn around the selection ----------
@@ -398,6 +423,7 @@ void InvalidatePicture(Overlay& o) {
 
 void SetSelection(Overlay& o, const RECT& r) {
     ChromeChange change(o);
+    if (!o.hasSelection) o.selectionOrder = NextOrder();
     o.selection = Clamp(o, r);
     o.hasSelection = true;
 }
@@ -1149,9 +1175,10 @@ void FinishSession() {
     for (Overlay* o : g_overlays) CommitText(*o);
     std::vector<Piece> areas = g_pieces;
     for (Overlay* o : g_overlays) {
-        if (o->hasSelection && !o->picking) areas.push_back(Piece{o, o->selection});
+        if (o->hasSelection && !o->picking) areas.push_back(Piece{o, o->selection, o->selectionOrder});
     }
     if (areas.empty()) return;
+    std::sort(areas.begin(), areas.end(), [](const Piece& a, const Piece& b) { return a.order < b.order; });
 
     std::vector<Snapshot> parts;
     for (const Piece& a : areas) {
@@ -1197,7 +1224,7 @@ bool CreateOverlayWindow(HINSTANCE instance, HMONITOR monitor, bool picking);
 void AddArea(Overlay& o) {
     if (!o.hasSelection || AreaCount() >= kMaxAreas) return;
     CommitText(o);
-    g_pieces.push_back(Piece{&o, o.selection});
+    g_pieces.push_back(Piece{&o, o.selection, o.selectionOrder});
     o.hasSelection = false;
     o.picked = -1;
     o.tool = Tool::Area;
@@ -1242,33 +1269,42 @@ void AreaMouseDown(Overlay& o, POINT p) {
     o.dragStart = p;
     o.selectionAtStart = o.selection;
     o.moved = false;
+    o.creatingNew = false;
     const int hit = HitTest(o, p);
     if (hit >= TopLeft && hit <= Left) {
         o.drag = Drag::Resize;
         o.dragHandle = hit;
     } else if (hit == Inside) {
         o.drag = Drag::Move;
-    } else {
-        // Side-by-side mode: starting a selection here keeps a selection on another monitor as a part.
+    } else if (CompareMode() && KeptAreaAt(o, p) >= 0) {
+        // Side-by-side mode: a click on a kept area only makes it the active one.
+        const Piece chosen = g_pieces[KeptAreaAt(o, p)];
         for (Overlay* x : g_overlays) {
-            if (x == &o || !x->hasSelection || !CompareMode()) continue;
-            if (static_cast<int>(g_pieces.size()) + 2 > kMaxAreas) {  // no room for one more
-                ReleaseCapture();
-                return;
-            }
-            CommitText(*x);
-            g_pieces.push_back(Piece{x, x->selection});
-            x->hasSelection = false;
-            x->picked = -1;
-            x->tool = Tool::Area;
-            InvalidateRect(x->hwnd, nullptr, FALSE);
+            if (x->hasSelection) KeepSelection(*x);
         }
-        if (!o.hasSelection && AreaCount() >= kMaxAreas) {
-            ReleaseCapture();
-            return;
+        g_pieces.erase(std::remove_if(g_pieces.begin(), g_pieces.end(),
+                                      [&](const Piece& q) { return q.owner == &o && EqualRect(&q.area, &chosen.area); }),
+                       g_pieces.end());
+        {
+            ChromeChange change(o);
+            o.selection = chosen.area;
+            o.selectionOrder = chosen.order;
+            o.hasSelection = true;
         }
-        o.drag = Drag::Create;
+        InvalidateRect(o.hwnd, nullptr, FALSE);
+        ReleaseCapture();
+    } else {
+        o.drag = Drag::Create;  // in side-by-side mode the new area starts only when the mouse moves
     }
+}
+
+void KeepSelection(Overlay& o) {
+    if (!o.hasSelection) return;
+    CommitText(o);
+    g_pieces.push_back(Piece{&o, o.selection, o.selectionOrder});
+    o.hasSelection = false;
+    o.picked = -1;
+    InvalidateRect(o.hwnd, nullptr, FALSE);
 }
 
 void AreaMouseMove(Overlay& o, POINT p) {
@@ -1281,6 +1317,23 @@ void AreaMouseMove(Overlay& o, POINT p) {
     const RECT s0 = o.selectionAtStart;
     switch (o.drag) {
         case Drag::Create:
+            if (CompareMode() && !o.creatingNew) {
+                // A new area in side-by-side mode: the active one is kept with its number, if there is room.
+                const bool someActive = std::any_of(g_overlays.begin(), g_overlays.end(),
+                                                    [](const Overlay* x) { return x->hasSelection; });
+                if (someActive && AreaCount() >= kMaxAreas) {
+                    o.drag = Drag::None;
+                    ReleaseCapture();
+                    return;
+                }
+                for (Overlay* x : g_overlays) KeepSelection(*x);
+                if (AreaCount() >= kMaxAreas) {
+                    o.drag = Drag::None;
+                    ReleaseCapture();
+                    return;
+                }
+                o.creatingNew = true;
+            }
             SetSelection(o, Normalize(o.dragStart.x, o.dragStart.y, p.x, p.y));
             break;
         case Drag::Move: {
@@ -1304,7 +1357,7 @@ void AreaMouseUp(Overlay& o) {
     const bool click = drag == Drag::Create && !o.moved;
     o.drag = Drag::None;
     if (GetCapture() == o.hwnd) ReleaseCapture();
-    if (click) {
+    if (click && !CompareMode()) {
         SetSelection(o, ClientRect(o));  // a single click selects the whole screen
     }
     if (drag == Drag::Create && o.hasSelection && !o.firstSelectionDone && !CompareMode()) {
