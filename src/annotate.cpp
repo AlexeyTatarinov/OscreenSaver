@@ -219,9 +219,32 @@ void DrawPath(G::Graphics& g, const std::vector<Pt>& points, float width, const 
     g.DrawLines(&pen, pts.data(), static_cast<INT>(pts.size()));
 }
 
-void DrawOne(G::Graphics& g, const Shape& s, const TextStyle* caretStyle, COLORREF caretColor, float scale) {
+void DrawBlur(G::Graphics& g, const Shape& s, const BlurSource& blur) {
+    if (s.points.size() < 2) return;
+    const int level = std::clamp(s.size, 0, kSizeCount - 1);
+    const uint32_t* pixels = blur.pixels[level];
+    if (!pixels) return;
+    const int l = std::clamp(static_cast<int>(std::min(s.points[0].x, s.points[1].x)), 0, blur.width);
+    const int t = std::clamp(static_cast<int>(std::min(s.points[0].y, s.points[1].y)), 0, blur.height);
+    const int r = std::clamp(static_cast<int>(std::max(s.points[0].x, s.points[1].x)), 0, blur.width);
+    const int b = std::clamp(static_cast<int>(std::max(s.points[0].y, s.points[1].y)), 0, blur.height);
+    if (r <= l || b <= t) return;
+    // Wraps the blurred picture without copying it and shows the part under the object.
+    G::Bitmap source(blur.width, blur.height, blur.width * 4, PixelFormat32bppRGB,
+                     reinterpret_cast<BYTE*>(const_cast<uint32_t*>(pixels)));
+    const G::PixelOffsetMode mode = g.GetPixelOffsetMode();
+    g.SetPixelOffsetMode(G::PixelOffsetModeNone);
+    g.DrawImage(&source, G::Rect(l, t, r - l, b - t), l, t, r - l, b - t, G::UnitPixel);
+    g.SetPixelOffsetMode(mode);
+}
+
+void DrawOne(G::Graphics& g, const Shape& s, const TextStyle* caretStyle, COLORREF caretColor,
+             const BlurSource& blur, float scale) {
     const float width = StrokeWidth(s.tool, s.size, scale);
     switch (s.tool) {
+        case Tool::Blur:
+            DrawBlur(g, s, blur);
+            break;
         case Tool::Pencil:
         case Tool::Brush:
             DrawPath(g, s.points, width, ToColor(s.color));
@@ -334,7 +357,9 @@ float TextPresetPx(int size, float scale) {
     return kSizes[std::clamp(size, 0, kSizeCount - 1)] * scale;
 }
 
-bool IsTwoPointTool(Tool t) { return t == Tool::Arrow || t == Tool::Rect || t == Tool::Ellipse; }
+bool IsTwoPointTool(Tool t) {
+    return t == Tool::Arrow || t == Tool::Rect || t == Tool::Ellipse || t == Tool::Blur;
+}
 
 RECT ShapeBox(const Shape& s, float) {
     if (s.points.empty()) return RECT{0, 0, 0, 0};
@@ -370,7 +395,7 @@ RECT ShapeBounds(const Shape& s, float scale) {
 
 bool ShapeTouched(const Shape& s, Pt p, float r, float scale) {
     if (s.points.empty()) return false;
-    if (s.tool == Tool::Text) {
+    if (s.tool == Tool::Text || s.tool == Tool::Blur) {
         RECT box = ShapeBox(s, scale);
         InflateRect(&box, static_cast<int>(r), static_cast<int>(r));
         return PtInRect(&box, POINT{static_cast<LONG>(p.x), static_cast<LONG>(p.y)}) != FALSE;
@@ -380,7 +405,7 @@ bool ShapeTouched(const Shape& s, Pt p, float r, float scale) {
 
 bool ShapeHit(const Shape& s, Pt p, float scale) {
     if (s.points.empty()) return false;
-    if (s.tool == Tool::Text || s.tool == Tool::Rect || s.tool == Tool::Ellipse) {
+    if (s.tool == Tool::Text || s.tool == Tool::Rect || s.tool == Tool::Ellipse || s.tool == Tool::Blur) {
         RECT box = ShapeBox(s, scale);
         const int grow = static_cast<int>(StrokeWidth(s.tool, s.size, scale) / 2 + 5 * scale);
         InflateRect(&box, grow, grow);
@@ -420,8 +445,13 @@ void ScaleShape(Shape& s, const Shape& original, Pt a, float sx, float sy) {
     }
 }
 
+int BlurRadius(int size, float scale) {
+    static const float kRadius[kSizeCount] = {4.f, 9.f, 16.f};
+    return std::max(1, static_cast<int>(kRadius[std::clamp(size, 0, kSizeCount - 1)] * scale));
+}
+
 void DrawShapes(HDC dc, const RECT& clip, POINT off, const std::vector<const Shape*>& shapes, const Caret& caret,
-                float scale) {
+                const BlurSource& blur, float scale) {
     const int w = clip.right - clip.left;
     const int h = clip.bottom - clip.top;
     if (shapes.empty() || w <= 0 || h <= 0) return;
@@ -439,7 +469,7 @@ void DrawShapes(HDC dc, const RECT& clip, POINT off, const std::vector<const Sha
             const Shape& s = *shapes[i];
             const TextStyle* cs = &s == caret.shape ? &caret.style : nullptr;
             if (s.erasures.empty()) {
-                DrawOne(lg, s, cs, caret.color, scale);
+                DrawOne(lg, s, cs, caret.color, blur, scale);
                 continue;
             }
             // A partly erased object is drawn on its own layer, then the erased parts are cleared.
@@ -448,7 +478,7 @@ void DrawShapes(HDC dc, const RECT& clip, POINT off, const std::vector<const Sha
                 G::Graphics og(&own);
                 Prepare(og);
                 og.TranslateTransform(tx, ty);
-                DrawOne(og, s, cs, caret.color, scale);
+                DrawOne(og, s, cs, caret.color, blur, scale);
                 og.SetCompositingMode(G::CompositingModeSourceCopy);
                 const G::Color clear(0, 0, 0, 0);
                 for (const Erasure& e : s.erasures) DrawPath(og, e.points, e.width, clear);

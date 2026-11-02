@@ -19,7 +19,8 @@ constexpr int kStrike = kItalic + 1;
 constexpr int kFont = kStrike + 1;                        // opens the font window
 constexpr int kUndo = kFont + 1;
 constexpr int kRedo = kUndo + 1;
-constexpr int kSave = kRedo + 1;
+constexpr int kAddArea = kRedo + 1;                       // one more area for a side-by-side picture
+constexpr int kSave = kAddArea + 1;
 constexpr int kClose = kSave + 1;
 constexpr int kButtonCount = kClose + 1;
 constexpr int kNone = -1;
@@ -36,6 +37,7 @@ struct State {
     bool eraseParts = false;  // eraser rubs out parts (like Paint) instead of removing whole objects
     bool canUndo = false;
     bool canRedo = false;
+    bool canAddArea = false;
     int hover = kNone;
     bool dark = true;
 };

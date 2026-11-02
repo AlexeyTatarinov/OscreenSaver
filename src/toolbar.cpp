@@ -131,6 +131,32 @@ void IconClose(G::Graphics& g, const G::RectF& r, const G::Color& fg, float s) {
     g.DrawLine(&pen, r.GetRight() - 10 * s, r.Y + 10 * s, r.X + 10 * s, r.GetBottom() - 10 * s);
 }
 
+// Blur: a frame filled with soft dots.
+void IconBlur(G::Graphics& g, const G::RectF& r, const G::Color& fg, float s) {
+    const float l = r.X + 7 * s, t = r.Y + 8 * s, w = r.Width - 14 * s, h = r.Height - 16 * s;
+    G::Pen pen(fg, 1.5f * s);
+    g.DrawRectangle(&pen, l, t, w, h);
+    for (int i = 0; i < 3; ++i) {
+        for (int j = 0; j < 2; ++j) {
+            const BYTE alpha = static_cast<BYTE>(70 + 60 * ((i + j) % 2));
+            G::SolidBrush dot(G::Color(alpha, fg.GetR(), fg.GetG(), fg.GetB()));
+            const float d = 4.5f * s;
+            g.FillEllipse(&dot, l + w * (i + 0.5f) / 3 - d / 2, t + h * (j + 0.5f) / 2 - d / 2, d, d);
+        }
+    }
+}
+
+// Add area: two frames side by side and a plus.
+void IconAddArea(G::Graphics& g, const G::RectF& r, const G::Color& fg, float s) {
+    G::Pen pen(fg, 1.5f * s);
+    g.DrawRectangle(&pen, r.X + 5 * s, r.Y + 10 * s, 9 * s, 12 * s);
+    g.DrawRectangle(&pen, r.X + 16 * s, r.Y + 10 * s, 9 * s, 12 * s);
+    G::Pen plus(fg, 2.f * s);
+    const float cx = r.GetRight() - 7 * s, cy = r.Y + 8 * s;
+    g.DrawLine(&plus, cx - 4 * s, cy, cx + 4 * s, cy);
+    g.DrawLine(&plus, cx, cy - 4 * s, cx, cy + 4 * s);
+}
+
 // Mouse pointer: pick, move and resize drawn objects.
 void IconSelect(G::Graphics& g, const G::RectF& r, const G::Color& fg, float s) {
     const float x = r.X + 11 * s, y = r.Y + 7 * s;
@@ -258,7 +284,9 @@ void Draw(HDC dc, const RECT& panel, const State& st, float s) {
             G::SolidBrush hl(active ? Argb(accent, st.dark ? 150 : 60) : Argb(fgRgb, 30));
             g.FillRectangle(&hl, r.X + 2 * s, r.Y + 2 * s, r.Width - 4 * s, r.Height - 4 * s);
         }
-        const G::Color& color = ((id == kUndo && !st.canUndo) || (id == kRedo && !st.canRedo)) ? fgDisabled : fg;
+        const bool disabled = (id == kUndo && !st.canUndo) || (id == kRedo && !st.canRedo) ||
+                              (id == kAddArea && !st.canAddArea);
+        const G::Color& color = disabled ? fgDisabled : fg;
 
         if (id >= kFirstColor && id <= kCustomColor) {
             const int c = id - kFirstColor;
@@ -319,6 +347,8 @@ void Draw(HDC dc, const RECT& panel, const State& st, float s) {
                 break;
             }
             case static_cast<int>(Tool::Text): IconText(g, r, color, s); break;
+            case static_cast<int>(Tool::Blur): IconBlur(g, r, color, s); break;
+            case kAddArea: IconAddArea(g, r, color, s); break;
             case static_cast<int>(Tool::Eraser): IconEraser(g, r, color, s); break;
             case kUndo: IconUndo(g, r, color, s, false); break;
             case kRedo: IconUndo(g, r, color, s, true); break;
@@ -350,6 +380,8 @@ const wchar_t* Tip(int id) {
         case static_cast<int>(Tool::Text): return T(Str::TipText);
         case static_cast<int>(Tool::Eraser): return T(Str::TipEraser);
         case kUndo: return T(Str::TipUndo);
+        case kAddArea: return T(Str::TipAddArea);
+        case static_cast<int>(Tool::Blur): return T(Str::TipBlur);
         case kRedo: return T(Str::TipRedo);
         case kSave: return T(Str::TipSave);
         case kClose: return T(Str::TipClose);

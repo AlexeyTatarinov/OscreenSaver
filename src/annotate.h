@@ -2,11 +2,12 @@
 
 #include <windows.h>
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
 // Drawing tools. The order matches the buttons on the panel.
-enum class Tool { Area, Select, Pencil, Marker, Brush, Arrow, Rect, Ellipse, Text, Eraser, Count };
+enum class Tool { Area, Select, Pencil, Marker, Brush, Arrow, Rect, Ellipse, Blur, Text, Eraser, Count };
 
 // Fixed colours on the panel: green, red, white, black. Any other colour is picked in the colour window.
 constexpr int kColorCount = 4;
@@ -92,6 +93,16 @@ struct Caret {
     COLORREF color = 0;
 };
 
+// Blurred copies of the screenshot, one per strength (size button). Blur objects show a piece of them.
+struct BlurSource {
+    const uint32_t* pixels[kSizeCount] = {};
+    int width = 0;
+    int height = 0;
+};
+
+// Blur strength in pixels for a size button.
+int BlurRadius(int size, float scale);
+
 // Draws shapes onto dc, limited to clip. offset is subtracted from every coordinate.
 void DrawShapes(HDC dc, const RECT& clip, POINT offset, const std::vector<const Shape*>& shapes, const Caret& caret,
-                float scale);
+                const BlurSource& blur, float scale);

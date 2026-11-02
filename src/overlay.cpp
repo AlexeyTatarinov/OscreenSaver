@@ -111,12 +111,21 @@ struct Overlay {
     HDC dimDc = nullptr;
     HGDIOBJ dimOld = nullptr;
     HFONT font = nullptr;
+    Snapshot blurred[kSizeCount];  // made the first time a blur of that strength is used
     float scale = 1.f;
     float panelScale = 1.f;
     int unit = 1;  // whole-pixel size of one "point" of decoration
 };
 
 std::vector<Overlay*> g_overlays;
+
+// Areas kept for a side-by-side picture ("add area" button). The current selection is the next one.
+struct Piece {
+    Overlay* owner;
+    RECT area;
+};
+std::vector<Piece> g_pieces;
+constexpr int kMaxAreas = 4;
 
 }  // namespace
 void OverlayKey(unsigned vk);
@@ -142,6 +151,46 @@ RECT Union(const RECT& a, const RECT& b) {
     RECT r;
     UnionRect(&r, &a, &b);
     return r;
+}
+
+// ---------- Areas for the side-by-side picture ----------
+
+bool CompareMode() { return !g_pieces.empty(); }
+
+int AreaCount() {
+    int n = static_cast<int>(g_pieces.size());
+    for (const Overlay* o : g_overlays) n += o->hasSelection ? 1 : 0;
+    return n;
+}
+
+std::vector<RECT> PiecesOf(const Overlay& o) {
+    std::vector<RECT> list;
+    for (const Piece& p : g_pieces) {
+        if (p.owner == &o) list.push_back(p.area);
+    }
+    return list;
+}
+
+// Every area of this monitor that is shown clear and can be drawn on.
+std::vector<RECT> AreasOf(const Overlay& o) {
+    std::vector<RECT> list = PiecesOf(o);
+    if (o.hasSelection) list.push_back(o.selection);
+    return list;
+}
+
+bool InAnyArea(const Overlay& o, POINT p) {
+    for (const RECT& r : AreasOf(o)) {
+        if (PtInRect(&r, p)) return true;
+    }
+    return false;
+}
+
+// Number shown in the corner of an area (1..4) in side-by-side mode.
+int PieceNumber(const Overlay& o, const RECT& r) {
+    for (size_t i = 0; i < g_pieces.size(); ++i) {
+        if (g_pieces[i].owner == &o && EqualRect(&g_pieces[i].area, &r)) return static_cast<int>(i) + 1;
+    }
+    return static_cast<int>(g_pieces.size()) + 1;
 }
 
 // ---------- Geometry of everything drawn around the selection ----------
@@ -223,6 +272,13 @@ std::wstring SizeText(const Overlay& o) {
 
 RECT HintAnchor(const Overlay& o) { return RECT{0, 0, o.shot.Width(), Scaled(o, 80)}; }
 
+std::wstring HintText() {
+    if (!CompareMode()) return T(Str::HintSelect);
+    wchar_t buf[160];
+    swprintf(buf, 160, T(Str::HintNextArea), AreaCount() + 1);
+    return buf;
+}
+
 toolbar::State PanelState(const Overlay& o) {
     toolbar::State st;
     st.tool = o.tool;
@@ -236,15 +292,23 @@ toolbar::State PanelState(const Overlay& o) {
     st.eraseParts = o.eraseParts;
     st.canUndo = !o.undo.empty();
     st.canRedo = !o.redo.empty();
+    st.canAddArea = o.hasSelection && AreaCount() < kMaxAreas;
     st.hover = o.hover;
     st.dark = o.dark;
     return st;
 }
 
-bool PanelVisible(const Overlay& o) { return o.hasSelection && !o.picking; }
+bool PanelVisible(const Overlay& o) { return !o.picking && (o.hasSelection || !PiecesOf(o).empty()); }
+
+// The panel sits next to the current selection, or next to the last kept area of this monitor.
+RECT PanelAnchor(const Overlay& o) {
+    if (o.hasSelection) return o.selection;
+    const std::vector<RECT> pieces = PiecesOf(o);
+    return pieces.empty() ? RECT{0, 0, 0, 0} : pieces.back();
+}
 
 RECT PanelRect(const Overlay& o) {
-    return toolbar::Place(o.selection, ClientRect(o), o.panelScale, PanelState(o));
+    return toolbar::Place(PanelAnchor(o), ClientRect(o), o.panelScale, PanelState(o));
 }
 
 int PanelHit(const Overlay& o, POINT p) {
@@ -270,8 +334,7 @@ RECT TipBox(const Overlay& o) {
 
 // Circle that shows where the eraser works.
 bool EraserCircleVisible(const Overlay& o) {
-    return o.tool == Tool::Eraser && o.hasSelection && !o.picking && PtInRect(&o.selection, o.mouse) &&
-           PanelHit(o, o.mouse) == toolbar::kNone;
+    return o.tool == Tool::Eraser && !o.picking && InAnyArea(o, o.mouse) && PanelHit(o, o.mouse) == toolbar::kNone;
 }
 
 RECT EraserCircleRect(const Overlay& o) {
@@ -299,12 +362,18 @@ RECT PickFrameArea(const Overlay& o) {
 // Everything outside the picture itself: frames, handles, size label, panel, hints, eraser circle.
 RECT ChromeRect(const Overlay& o) {
     if (o.picking) return RECT{0, 0, 0, 0};
-    if (!o.hasSelection) return TextBox(o, T(Str::HintSelect), HintAnchor(o), true);
-    RECT r = o.selection;
-    InflateRect(&r, Scaled(o, 6), Scaled(o, 6));
-    if (o.tool == Tool::Area) r = Union(r, TextBox(o, SizeText(o).c_str(), o.selection, false));
-    r = Union(r, PanelRect(o));
-    r = Union(r, TipBox(o));
+    RECT r;
+    if (!o.hasSelection) {
+        r = TextBox(o, HintText().c_str(), HintAnchor(o), true);
+    } else {
+        r = o.selection;
+        InflateRect(&r, Scaled(o, 6), Scaled(o, 6));
+        if (o.tool == Tool::Area) r = Union(r, TextBox(o, SizeText(o).c_str(), o.selection, false));
+    }
+    if (PanelVisible(o)) {
+        r = Union(r, PanelRect(o));
+        r = Union(r, TipBox(o));
+    }
     r = Union(r, EraserCircleRect(o));
     r = Union(r, PickFrameArea(o));
     return r;
@@ -327,7 +396,7 @@ void InvalidateShape(Overlay& o, const Shape& s) {
 }
 
 void InvalidatePicture(Overlay& o) {
-    if (o.hasSelection) InvalidateRect(o.hwnd, &o.selection, FALSE);
+    for (const RECT& r : AreasOf(o)) InvalidateRect(o.hwnd, &r, FALSE);
 }
 
 // ---------- Selection of the screenshot area ----------
@@ -541,7 +610,7 @@ void OpenFontWindow(Overlay& o) {
 
 void SelectTool(Overlay& o, Tool t) {
     if (t != Tool::Text && t != Tool::Select) CommitText(o);
-    if (t != Tool::Area && !o.hasSelection) return;
+    if (t != Tool::Area && AreasOf(o).empty()) return;
     ChromeChange change(o);
     if (t != Tool::Select) o.picked = -1;
     o.tool = t;
@@ -819,6 +888,24 @@ void PickMouseUp(Overlay& o) {
     ChromeChange change(o);  // undo button
 }
 
+// ---------- Blur ----------
+
+// Blurred copies are made only for the strengths actually used, the first time they are needed.
+BlurSource BlurOf(Overlay& o) {
+    auto ensure = [&](const Shape& s) {
+        if (s.tool != Tool::Blur) return;
+        const int level = std::clamp(s.size, 0, kSizeCount - 1);
+        if (!o.blurred[level].bitmap) MakeBlurredCopy(o.shot, BlurRadius(level, o.scale), o.blurred[level]);
+    };
+    for (const Shape& s : o.shapes) ensure(s);
+    if (o.drawing) ensure(o.current);
+    BlurSource b;
+    b.width = o.shot.Width();
+    b.height = o.shot.Height();
+    for (int i = 0; i < kSizeCount; ++i) b.pixels[i] = o.blurred[i].pixels;
+    return b;
+}
+
 // ---------- Painting ----------
 
 void DrawFrame(const Overlay& o, HDC dc) {
@@ -839,6 +926,38 @@ void DrawFrame(const Overlay& o, HDC dc) {
     SelectObject(dc, oldBrush);
     SelectObject(dc, oldPen);
     DeleteObject(pen);
+}
+
+// Number in the top-left corner of an area in side-by-side mode.
+void DrawBadge(const Overlay& o, HDC dc, const RECT& area, int number) {
+    const int d = Scaled(o, 18);
+    const RECT box = {area.left + Scaled(o, 4), area.top + Scaled(o, 4), area.left + Scaled(o, 4) + d,
+                      area.top + Scaled(o, 4) + d};
+    HBRUSH brush = CreateSolidBrush(kAccent);
+    HGDIOBJ oldBrush = SelectObject(dc, brush);
+    HGDIOBJ oldPen = SelectObject(dc, GetStockObject(NULL_PEN));
+    Ellipse(dc, box.left, box.top, box.right + 1, box.bottom + 1);
+    SelectObject(dc, oldPen);
+    SelectObject(dc, oldBrush);
+    DeleteObject(brush);
+    wchar_t text[4];
+    swprintf(text, 4, L"%d", number);
+    SetBkMode(dc, TRANSPARENT);
+    SetTextColor(dc, RGB(255, 255, 255));
+    RECT r = box;
+    DrawTextW(dc, text, -1, &r, DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+}
+
+// A kept area: solid frame and its number.
+void DrawPieceFrame(const Overlay& o, HDC dc, const RECT& a) {
+    HPEN pen = CreatePen(PS_SOLID, Scaled(o, 2), kAccent);
+    HGDIOBJ oldPen = SelectObject(dc, pen);
+    HGDIOBJ oldBrush = SelectObject(dc, GetStockObject(NULL_BRUSH));
+    Rectangle(dc, a.left, a.top, a.right, a.bottom);
+    SelectObject(dc, oldBrush);
+    SelectObject(dc, oldPen);
+    DeleteObject(pen);
+    DrawBadge(o, dc, a, PieceNumber(o, a));
 }
 
 void DrawPickFrame(const Overlay& o, HDC dc) {
@@ -896,27 +1015,38 @@ void Paint(Overlay& o) {
     if (o.picking) {
         const wchar_t* hint = T(Str::HintPickMonitor);
         DrawTextBox(o.backDc, hint, TextBox(o, hint, ClientRect(o), true));
-    } else if (o.hasSelection) {
-        const RECT& s = o.selection;
-        BitBlt(o.backDc, s.left, s.top, s.right - s.left, s.bottom - s.top, o.shotDc, s.left, s.top, SRCCOPY);
-        RECT clip;
-        if (IntersectRect(&clip, &s, &p)) {
-            DrawShapes(o.backDc, clip, POINT{0, 0}, VisibleShapes(o), CurrentCaret(o), o.scale);
+    } else {
+        // Clear picture and drawings in every area: the current selection and the kept ones.
+        const BlurSource blur = BlurOf(o);
+        const std::vector<const Shape*> shapes = VisibleShapes(o);
+        for (const RECT& a : AreasOf(o)) {
+            BitBlt(o.backDc, a.left, a.top, a.right - a.left, a.bottom - a.top, o.shotDc, a.left, a.top, SRCCOPY);
+            RECT clip;
+            if (IntersectRect(&clip, &a, &p)) {
+                DrawShapes(o.backDc, clip, POINT{0, 0}, shapes, CurrentCaret(o), blur, o.scale);
+            }
         }
-        DrawFrame(o, o.backDc);
+        for (const RECT& a : PiecesOf(o)) DrawPieceFrame(o, o.backDc, a);
+        if (o.hasSelection) {
+            DrawFrame(o, o.backDc);
+            if (CompareMode()) DrawBadge(o, o.backDc, o.selection, PieceNumber(o, o.selection));
+        }
         DrawPickFrame(o, o.backDc);
         if (EraserCircleVisible(o)) DrawEraserCircle(o, o.backDc);
-        if (o.tool == Tool::Area) {
+        if (o.hasSelection && o.tool == Tool::Area) {
             const std::wstring size = SizeText(o);
-            DrawTextBox(o.backDc, size.c_str(), TextBox(o, size.c_str(), s, false));
+            DrawTextBox(o.backDc, size.c_str(), TextBox(o, size.c_str(), o.selection, false));
         }
-        toolbar::Draw(o.backDc, PanelRect(o), PanelState(o), o.panelScale);
-        if (o.hover != toolbar::kNone) {
-            DrawTextBox(o.backDc, toolbar::Tip(o.hover), TipBox(o));
+        if (!o.hasSelection) {
+            const std::wstring hint = HintText();
+            DrawTextBox(o.backDc, hint.c_str(), TextBox(o, hint.c_str(), HintAnchor(o), true));
         }
-    } else {
-        const wchar_t* hint = T(Str::HintSelect);
-        DrawTextBox(o.backDc, hint, TextBox(o, hint, HintAnchor(o), true));
+        if (PanelVisible(o)) {
+            toolbar::Draw(o.backDc, PanelRect(o), PanelState(o), o.panelScale);
+            if (o.hover != toolbar::kNone) {
+                DrawTextBox(o.backDc, toolbar::Tip(o.hover), TipBox(o));
+            }
+        }
     }
     RestoreDC(o.backDc, saved);
 
@@ -931,6 +1061,7 @@ void CloseAll() {
     for (Overlay* o : copy) {
         DestroyWindow(o->hwnd);
     }
+    g_pieces.clear();
 }
 
 // Picker: the user right-clicked this monitor. Keep it, close the others.
@@ -944,36 +1075,99 @@ void ChooseMonitor(Overlay& chosen) {
     SetFocus(chosen.hwnd);
 }
 
-void Finish(Overlay& o) {
-    CommitText(o);
-    const RECT s = o.selection;
+// The selected part of one monitor's screenshot with everything drawn on it.
+bool ComposeArea(Overlay& o, const RECT& s, Snapshot& result) {
     const int w = s.right - s.left;
     const int h = s.bottom - s.top;
-    if (!o.hasSelection || w <= 0 || h <= 0) {
-        return;
-    }
-    // Final picture = the selected part of the screen + everything drawn on it.
-    Snapshot result;
-    if (!CreateBlankSnapshot(w, h, result)) {
-        NotifySaveFailed();
-        return;
-    }
+    if (w <= 0 || h <= 0 || !CreateBlankSnapshot(w, h, result)) return false;
     for (int y = 0; y < h; ++y) {
         std::memcpy(result.pixels + static_cast<size_t>(y) * w,
                     o.shot.pixels + static_cast<size_t>(s.top + y) * o.shot.Width() + s.left,
                     static_cast<size_t>(w) * 4);
     }
+    const BlurSource blur = BlurOf(o);
     HDC memory = CreateCompatibleDC(nullptr);
     HGDIOBJ old = SelectObject(memory, result.bitmap);
-    DrawShapes(memory, RECT{0, 0, w, h}, POINT{s.left, s.top}, VisibleShapes(o), Caret{}, o.scale);
+    DrawShapes(memory, RECT{0, 0, w, h}, POINT{s.left, s.top}, VisibleShapes(o), Caret{}, blur, o.scale);
     GdiFlush();
     SelectObject(memory, old);
     DeleteDC(memory);
+    return true;
+}
 
-    const RECT all = {0, 0, w, h};
+// Joins 2-4 pictures without overlapping: two side by side; a third centred below them;
+// a fourth next to the third (2 x 2). Each row is centred; free space is white.
+bool JoinPictures(std::vector<Snapshot>& parts, Snapshot& out) {
+    std::vector<std::vector<size_t>> rows;
+    if (parts.size() <= 2) {
+        rows.push_back({0});
+        if (parts.size() == 2) rows[0].push_back(1);
+    } else {
+        rows.push_back({0, 1});
+        rows.push_back({2});
+        if (parts.size() == 4) rows[1].push_back(3);
+    }
+    std::vector<int> rowW(rows.size(), 0), rowH(rows.size(), 0);
+    int width = 0, height = 0;
+    for (size_t r = 0; r < rows.size(); ++r) {
+        for (size_t i : rows[r]) {
+            rowW[r] += parts[i].Width();
+            rowH[r] = std::max(rowH[r], parts[i].Height());
+        }
+        width = std::max(width, rowW[r]);
+        height += rowH[r];
+    }
+    if (!CreateBlankSnapshot(width, height, out)) return false;
+    std::fill(out.pixels, out.pixels + static_cast<size_t>(width) * height, 0x00FFFFFFu);
+    int top = 0;
+    for (size_t r = 0; r < rows.size(); ++r) {
+        int x = (width - rowW[r]) / 2;
+        for (size_t i : rows[r]) {
+            const Snapshot& p = parts[i];
+            const int y0 = top + (rowH[r] - p.Height()) / 2;
+            for (int y = 0; y < p.Height(); ++y) {
+                std::memcpy(out.pixels + static_cast<size_t>(y0 + y) * width + x,
+                            p.pixels + static_cast<size_t>(y) * p.Width(), static_cast<size_t>(p.Width()) * 4);
+            }
+            x += p.Width();
+        }
+        top += rowH[r];
+    }
+    return true;
+}
+
+// Saves and copies the result of the whole session: one area, or up to four joined together.
+void FinishSession() {
+    for (Overlay* o : g_overlays) CommitText(*o);
+    std::vector<Piece> areas = g_pieces;
+    for (Overlay* o : g_overlays) {
+        if (o->hasSelection && !o->picking) areas.push_back(Piece{o, o->selection});
+    }
+    if (areas.empty()) return;
+
+    std::vector<Snapshot> parts;
+    for (const Piece& a : areas) {
+        Snapshot part;
+        if (ComposeArea(*a.owner, a.area, part)) parts.push_back(part);
+    }
+    Snapshot result;
+    bool ok = false;
+    if (parts.size() == 1) {
+        result = parts[0];
+        parts.clear();
+        ok = true;
+    } else if (!parts.empty()) {
+        ok = JoinPictures(parts, result);
+    }
+    for (Snapshot& p : parts) FreeSnapshot(p);
+    if (!ok) {
+        NotifySaveFailed();
+        return;
+    }
+    const RECT all = {0, 0, result.Width(), result.Height()};
     std::wstring path;
     const bool saved = SaveAreaAsJpg(result, all, path);
-    CopyAreaToClipboard(result, all, o.hwnd);
+    CopyAreaToClipboard(result, all, g_overlays.empty() ? nullptr : g_overlays.front()->hwnd);
     FreeSnapshot(result);
     CloseAll();
     if (saved) {
@@ -981,6 +1175,30 @@ void Finish(Overlay& o) {
     } else {
         NotifySaveFailed();
     }
+}
+
+void Finish(Overlay&) { FinishSession(); }
+
+bool CreateOverlayWindow(HINSTANCE instance, HMONITOR monitor, bool picking);
+
+// Keeps the current selection as one part of a side-by-side picture and lets the user select the next
+// one, on this or another monitor.
+void AddArea(Overlay& o) {
+    if (!o.hasSelection || AreaCount() >= kMaxAreas) return;
+    CommitText(o);
+    g_pieces.push_back(Piece{&o, o.selection});
+    o.hasSelection = false;
+    o.picked = -1;
+    o.tool = Tool::Area;
+    InvalidateRect(o.hwnd, nullptr, FALSE);
+    // Other monitors are frozen now too, so the next area can be taken there.
+    for (HMONITOR m : AllMonitors()) {
+        const bool open = std::any_of(g_overlays.begin(), g_overlays.end(), [&](const Overlay* x) {
+            return MonitorFromRect(&x->shot.bounds, MONITOR_DEFAULTTONULL) == m;
+        });
+        if (!open) CreateOverlayWindow(GetModuleHandleW(nullptr), m, false);
+    }
+    for (Overlay* x : g_overlays) InvalidateRect(x->hwnd, nullptr, FALSE);  // new hint "area N of 4"
 }
 
 void OnPanelClick(Overlay& o, int id) {
@@ -997,6 +1215,7 @@ void OnPanelClick(Overlay& o, int id) {
     else if (id == kFont) OpenFontWindow(o);
     else if (id == kUndo) Undo(o);
     else if (id == kRedo) Redo(o);
+    else if (id == kAddArea) AddArea(o);
     else if (id == kSave) Finish(o);
     else if (id == kClose) CloseAll();
 }
@@ -1015,6 +1234,24 @@ void AreaMouseDown(Overlay& o, POINT p) {
     } else if (hit == Inside) {
         o.drag = Drag::Move;
     } else {
+        // Side-by-side mode: starting a selection here keeps a selection on another monitor as a part.
+        for (Overlay* x : g_overlays) {
+            if (x == &o || !x->hasSelection || !CompareMode()) continue;
+            if (static_cast<int>(g_pieces.size()) + 2 > kMaxAreas) {  // no room for one more
+                ReleaseCapture();
+                return;
+            }
+            CommitText(*x);
+            g_pieces.push_back(Piece{x, x->selection});
+            x->hasSelection = false;
+            x->picked = -1;
+            x->tool = Tool::Area;
+            InvalidateRect(x->hwnd, nullptr, FALSE);
+        }
+        if (!o.hasSelection && AreaCount() >= kMaxAreas) {
+            ReleaseCapture();
+            return;
+        }
         o.drag = Drag::Create;
     }
 }
@@ -1055,7 +1292,7 @@ void AreaMouseUp(Overlay& o) {
     if (click) {
         SetSelection(o, ClientRect(o));  // a single click selects the whole screen
     }
-    if (drag == Drag::Create && o.hasSelection && !o.firstSelectionDone) {
+    if (drag == Drag::Create && o.hasSelection && !o.firstSelectionDone && !CompareMode()) {
         // Order of work: first choose the area, then draw. The pencil is ready right away.
         o.firstSelectionDone = true;
         SelectTool(o, o.lastDrawTool);
@@ -1078,7 +1315,7 @@ LPCWSTR CursorAt(const Overlay& o, POINT c) {
     if (PanelHit(o, c) != toolbar::kNone) return IDC_ARROW;
     switch (o.tool) {
         case Tool::Text: return IDC_IBEAM;
-        case Tool::Eraser: return PtInRect(&o.selection, c) ? nullptr : IDC_ARROW;  // the circle is the cursor
+        case Tool::Eraser: return InAnyArea(o, c) ? nullptr : IDC_ARROW;  // the circle is the cursor
         case Tool::Select: {
             if (o.pickDrag == Drag::Resize) return CursorFor(o.pickHandle);
             if (o.pickDrag == Drag::Move) return IDC_SIZEALL;
@@ -1134,6 +1371,7 @@ void FreeOverlay(Overlay* o) {
         DeleteDC(o->dimDc);
     }
     if (o->font) DeleteObject(o->font);
+    for (Snapshot& b : o->blurred) FreeSnapshot(b);
     FreeSnapshot(o->shot);
     FreeSnapshot(o->dim);
     delete o;
@@ -1191,7 +1429,7 @@ void OnMouseDown(Overlay& o, POINT p) {
         return;
     }
     SetFocus(o.hwnd);
-    if (o.tool != Tool::Area && o.tool != Tool::Select && !PtInRect(&o.selection, p)) {
+    if (o.tool != Tool::Area && o.tool != Tool::Select && !InAnyArea(o, p)) {
         CommitText(o);  // drawing outside the selection would not be seen or saved
         return;
     }
@@ -1404,13 +1642,7 @@ void OverlayKey(unsigned vk) {
         return;
     }
     if (vk == VK_RETURN) {
-        HWND focus = GetForegroundWindow();
-        for (Overlay* o : g_overlays) {
-            if (!o->picking && (o->hwnd == focus || g_overlays.size() == 1)) {
-                Finish(*o);
-                return;
-            }
-        }
+        FinishSession();
     }
 }
 
@@ -1430,6 +1662,7 @@ void OpenOverlay(HINSTANCE instance) {
     if (IsOverlayOpen()) {
         return;
     }
+    g_pieces.clear();
     HMONITOR monitor = MonitorUnderCursor();
     if (monitor) {
         if (CreateOverlayWindow(instance, monitor, false)) {

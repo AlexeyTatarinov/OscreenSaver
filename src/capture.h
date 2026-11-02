@@ -29,4 +29,7 @@ bool CreateBlankSnapshot(int width, int height, Snapshot& out);
 // Makes a darkened grey copy used as the mask around the selected area.
 bool MakeDimmedCopy(const Snapshot& source, Snapshot& out);
 
+// Makes a blurred copy (three box blurs ~ a smooth Gaussian blur). radius is in pixels.
+bool MakeBlurredCopy(const Snapshot& source, int radius, Snapshot& out);
+
 void FreeSnapshot(Snapshot& snapshot);
