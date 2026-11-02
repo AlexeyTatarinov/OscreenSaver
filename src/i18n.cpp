@@ -26,9 +26,9 @@ const wchar_t* const kStrings[][3] = {
     /* HookFailed */     {L"Could not register the PrintScreen key.",
                           L"Не удалось подключить клавишу PrintScreen.",
                           L"Не вдалося підключити клавішу PrintScreen."},
-    /* HintSelect */     {L"Select an area with the mouse  •  Enter — save  •  Esc — cancel",
-                          L"Выделите область мышью  •  Enter — сохранить  •  Esc — отмена",
-                          L"Виділіть область мишею  •  Enter — зберегти  •  Esc — скасувати"},
+    /* HintSelect */     {L"Select an area with the mouse  •  Ctrl + mouse — one more area  •  Enter — save  •  Esc — cancel",
+                          L"Выделите область мышью  •  Ctrl + мышь — ещё область  •  Enter — сохранить  •  Esc — отмена",
+                          L"Виділіть область мишею  •  Ctrl + миша — ще область  •  Enter — зберегти  •  Esc — скасувати"},
     /* HintPickMonitor */{L"Right-click to choose this monitor",
                           L"Нажмите правую кнопку мыши, чтобы выбрать этот монитор",
                           L"Натисніть праву кнопку миші, щоб вибрати цей монітор"},
@@ -65,8 +65,8 @@ const wchar_t* const kStrings[][3] = {
     /* TipEraseWhole */ {L"Erase whole objects", L"Стирать объекты целиком", L"Стирати об’єкти цілком"},
     /* TipErasePart */ {L"Erase parts (like Paint)", L"Стирать частично (как в Paint)", L"Стирати частково (як у Paint)"},
     /* TipBlur */ {L"Blur: drag over what to hide; size buttons = strength", L"Размытие: обведите то, что нужно скрыть; толщина = сила размытия", L"Розмиття: обведіть те, що треба приховати; товщина = сила розмиття"},
-    /* TipAddArea */ {L"Add one more area: pictures are joined side by side (up to 4)", L"Добавить ещё область: картинки склеятся рядом (до 4)", L"Додати ще область: картинки склеяться поруч (до 4)"},
-    /* HintNextArea */ {L"Select area %d of 4  \u2022  Enter \u2014 save  \u2022  Esc \u2014 cancel", L"Выделите область %d из 4  \u2022  Enter \u2014 сохранить  \u2022  Esc \u2014 отмена", L"Виділіть область %d з 4  \u2022  Enter \u2014 зберегти  \u2022  Esc \u2014 скасувати"},
+    /* TipAddArea */ {L"One more area (or Ctrl + mouse): pictures are joined side by side (up to 4)", L"Ещё область (или Ctrl + мышь): картинки склеятся рядом (до 4)", L"Ще область (або Ctrl + миша): картинки склеяться поруч (до 4)"},
+    /* HintNextArea */ {L"Select area %d of 4 (Ctrl + mouse)  \u2022  Enter \u2014 save  \u2022  Esc \u2014 cancel", L"Выделите область %d из 4 (Ctrl + мышь)  \u2022  Enter \u2014 сохранить  \u2022  Esc \u2014 отмена", L"Виділіть область %d з 4 (Ctrl + миша)  \u2022  Enter \u2014 зберегти  \u2022  Esc \u2014 скасувати"},
     /* TipFrames */ {L"Thin grey frame around each joined area: on / off", L"Тонкая серая рамка вокруг склеенных областей: вкл / выкл", L"Тонка сіра рамка навколо склеєних областей: увімк / вимк"},
 };
 

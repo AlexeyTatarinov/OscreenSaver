@@ -86,10 +86,16 @@ struct Line {
     float right = 0;
 };
 
+struct Stop {
+    float x = 0;      // where a text cursor at this position stands
+    size_t line = 0;
+};
+
 struct Layout {
     std::vector<FontPack> fonts;  // one per run, then the cursor's
     std::vector<Piece> pieces;
     std::vector<Line> lines;
+    std::vector<Stop> stops;      // cursor positions 0..length (only when asked for)
     float caretX = 0;
     float caretTop = 0;
     float caretHeight = 0;
@@ -102,17 +108,34 @@ void Grow(Line& line, const FontPack& f) {
     line.height = std::max(line.height, f.height);
 }
 
-Layout MakeLayout(G::Graphics& g, const Shape& s, const TextStyle* caretStyle) {
+float TextWidth(G::Graphics& g, const std::wstring& text, size_t count, const FontPack& f) {
+    if (count == 0) return 0;
+    G::RectF m;
+    g.MeasureString(text.c_str(), static_cast<INT>(count), f.font.get(), G::PointF(0, 0), &Format(), &m);
+    return m.Width;
+}
+
+// caretIndex: position of the text cursor (-1 = at the end). withStops: also find every cursor position.
+Layout MakeLayout(G::Graphics& g, const Shape& s, const TextStyle* caretStyle, int caretIndex = -1,
+                  bool withStops = false) {
     Layout L;
     const Pt origin = s.points.empty() ? Pt{} : s.points[0];
     for (const TextRun& run : s.runs) L.fonts.push_back(MakeFont(run.style, g));
     const TextStyle fallback;
     L.fonts.push_back(MakeFont(caretStyle ? *caretStyle : (s.runs.empty() ? fallback : s.runs.back().style), g));
     const size_t caretFont = L.fonts.size() - 1;
+    if (caretStyle) withStops = true;
+
+    size_t total = 0;
+    for (const TextRun& run : s.runs) total += run.text.size();
+    if (withStops) {
+        L.stops.assign(total + 1, Stop{origin.x, 0});
+    }
 
     L.lines.emplace_back();
     Grow(L.lines.back(), L.fonts[s.runs.empty() ? caretFont : 0]);
     float x = origin.x;
+    size_t global = 0;  // index of the first letter of the current run in the whole text
     for (size_t r = 0; r < s.runs.size(); ++r) {
         const std::wstring& text = s.runs[r].text;
         size_t start = 0;
@@ -120,11 +143,14 @@ Layout MakeLayout(G::Graphics& g, const Shape& s, const TextStyle* caretStyle) {
             const size_t nl = text.find(L'\n', start);
             const std::wstring part = text.substr(start, nl == std::wstring::npos ? std::wstring::npos : nl - start);
             if (!part.empty()) {
-                G::RectF m;
-                g.MeasureString(part.c_str(), static_cast<INT>(part.size()), L.fonts[r].font.get(), G::PointF(0, 0),
-                                &Format(), &m);
-                L.pieces.push_back(Piece{part, r, x, L.lines.size() - 1});
-                x += m.Width;
+                const size_t line = L.lines.size() - 1;
+                L.pieces.push_back(Piece{part, r, x, line});
+                if (withStops) {
+                    for (size_t k = 1; k <= part.size(); ++k) {
+                        L.stops[global + start + k] = Stop{x + TextWidth(g, part, k, L.fonts[r]), line};
+                    }
+                }
+                x += TextWidth(g, part, part.size(), L.fonts[r]);
                 Grow(L.lines.back(), L.fonts[r]);
             }
             L.lines.back().right = x;
@@ -132,11 +158,21 @@ Layout MakeLayout(G::Graphics& g, const Shape& s, const TextStyle* caretStyle) {
             L.lines.emplace_back();  // a new line starts with the look of the text that made it
             Grow(L.lines.back(), L.fonts[r]);
             x = origin.x;
+            if (withStops) L.stops[global + nl + 1] = Stop{origin.x, L.lines.size() - 1};
             start = nl + 1;
         }
+        global += text.size();
     }
-    if (caretStyle) Grow(L.lines.back(), L.fonts[caretFont]);
     L.lines.back().right = std::max(L.lines.back().right, x);
+
+    size_t caretLine = L.lines.size() - 1;
+    L.caretX = x;
+    if (withStops) {
+        const size_t idx = caretIndex < 0 ? total : std::min<size_t>(static_cast<size_t>(caretIndex), total);
+        L.caretX = L.stops[idx].x;
+        caretLine = L.stops[idx].line;
+    }
+    if (caretStyle) Grow(L.lines[caretLine], L.fonts[caretFont]);
 
     float top = origin.y;
     float right = origin.x;
@@ -145,10 +181,9 @@ Layout MakeLayout(G::Graphics& g, const Shape& s, const TextStyle* caretStyle) {
         top += line.height;
         right = std::max(right, line.right);
     }
-    const Line& last = L.lines.back();
+    const Line& cl = L.lines[caretLine];
     const FontPack& cf = L.fonts[caretFont];
-    L.caretX = x;
-    L.caretTop = last.top + last.ascent - cf.ascent;
+    L.caretTop = cl.top + cl.ascent - cf.ascent;
     L.caretHeight = cf.ascent + cf.descent;
     L.box = G::RectF(origin.x, origin.y, right - origin.x, top - origin.y);
     return L;
@@ -166,9 +201,10 @@ G::RectF TextBox(const Shape& s) {
     return box;
 }
 
-void DrawText(G::Graphics& g, const Shape& s, const TextStyle* caretStyle, COLORREF caretColor, float scale) {
+void DrawText(G::Graphics& g, const Shape& s, const TextStyle* caretStyle, COLORREF caretColor, int caretIndex,
+              float scale) {
     if (s.points.empty()) return;
-    const Layout L = MakeLayout(g, s, caretStyle);
+    const Layout L = MakeLayout(g, s, caretStyle, caretIndex);
     for (const Piece& p : L.pieces) {
         const Line& line = L.lines[p.line];
         const FontPack& f = L.fonts[p.font];
@@ -238,7 +274,7 @@ void DrawBlur(G::Graphics& g, const Shape& s, const BlurSource& blur) {
     g.SetPixelOffsetMode(mode);
 }
 
-void DrawOne(G::Graphics& g, const Shape& s, const TextStyle* caretStyle, COLORREF caretColor,
+void DrawOne(G::Graphics& g, const Shape& s, const TextStyle* caretStyle, COLORREF caretColor, int caretIndex,
              const BlurSource& blur, float scale) {
     const float width = StrokeWidth(s.tool, s.size, scale);
     switch (s.tool) {
@@ -275,7 +311,7 @@ void DrawOne(G::Graphics& g, const Shape& s, const TextStyle* caretStyle, COLORR
             break;
         }
         case Tool::Text:
-            DrawText(g, s, caretStyle, caretColor, scale);
+            DrawText(g, s, caretStyle, caretColor, caretIndex, scale);
             break;
         default:
             break;
@@ -324,6 +360,152 @@ RECT ToRect(float l, float t, float r, float b) {
 }
 
 }  // namespace
+
+// ---------- Editing text at the cursor ----------
+
+namespace {
+
+Layout LayoutWithStops(const Shape& s) {
+    HDC dc = CreateCompatibleDC(nullptr);
+    Layout L;
+    {
+        G::Graphics g(dc);
+        Prepare(g);
+        L = MakeLayout(g, s, nullptr, -1, true);
+    }
+    DeleteDC(dc);
+    return L;
+}
+
+// Splits the pieces so that a piece boundary falls exactly at position; returns the piece index there.
+size_t SplitAt(Shape& s, int position) {
+    int start = 0;
+    for (size_t i = 0; i < s.runs.size(); ++i) {
+        const int len = static_cast<int>(s.runs[i].text.size());
+        if (position == start) return i;
+        if (position < start + len) {
+            TextRun tail = s.runs[i];
+            tail.text = s.runs[i].text.substr(static_cast<size_t>(position - start));
+            s.runs[i].text.resize(static_cast<size_t>(position - start));
+            s.runs.insert(s.runs.begin() + static_cast<std::ptrdiff_t>(i) + 1, tail);
+            return i + 1;
+        }
+        start += len;
+    }
+    return s.runs.size();
+}
+
+// Joins neighbouring pieces with the same look and removes empty ones.
+void Tidy(Shape& s) {
+    std::vector<TextRun> out;
+    for (TextRun& r : s.runs) {
+        if (r.text.empty()) continue;
+        if (!out.empty() && out.back().style == r.style && out.back().color == r.color) {
+            out.back().text += r.text;
+        } else {
+            out.push_back(r);
+        }
+    }
+    s.runs.swap(out);
+}
+
+}  // namespace
+
+int TextLength(const Shape& s) {
+    int n = 0;
+    for (const TextRun& r : s.runs) n += static_cast<int>(r.text.size());
+    return n;
+}
+
+int TextPositionAt(const Shape& s, Pt p) {
+    const Layout L = LayoutWithStops(s);
+    if (L.stops.empty()) return 0;
+    size_t line = L.lines.size() - 1;
+    for (size_t i = 0; i < L.lines.size(); ++i) {
+        if (p.y < L.lines[i].top + L.lines[i].height) {
+            line = i;
+            break;
+        }
+    }
+    int best = -1;
+    float bestDistance = 1e30f;
+    for (size_t i = 0; i < L.stops.size(); ++i) {
+        if (L.stops[i].line != line) continue;
+        const float d = std::fabs(L.stops[i].x - p.x);
+        if (d < bestDistance) {
+            bestDistance = d;
+            best = static_cast<int>(i);
+        }
+    }
+    return best < 0 ? static_cast<int>(L.stops.size()) - 1 : best;
+}
+
+int TextMoveOnLine(const Shape& s, int position, int how) {
+    const Layout L = LayoutWithStops(s);
+    const int last = static_cast<int>(L.stops.size()) - 1;
+    position = std::clamp(position, 0, last);
+    const size_t line = L.stops[position].line;
+    if (how == -2 || how == 2) {
+        int result = position;
+        for (int i = 0; i <= last; ++i) {
+            if (L.stops[i].line != line) continue;
+            if (how == -2) return i;  // first position on the line
+            result = i;               // last position on the line
+        }
+        return result;
+    }
+    const long target = static_cast<long>(line) + how;
+    if (target < 0 || target >= static_cast<long>(L.lines.size())) return position;
+    int best = position;
+    float bestDistance = 1e30f;
+    for (int i = 0; i <= last; ++i) {
+        if (static_cast<long>(L.stops[i].line) != target) continue;
+        const float d = std::fabs(L.stops[i].x - L.stops[position].x);
+        if (d < bestDistance) {
+            bestDistance = d;
+            best = i;
+        }
+    }
+    return best;
+}
+
+void TextInsert(Shape& s, int position, wchar_t ch, const TextStyle& style, COLORREF color) {
+    position = std::clamp(position, 0, TextLength(s));
+    const size_t at = SplitAt(s, position);
+    s.runs.insert(s.runs.begin() + static_cast<std::ptrdiff_t>(at), TextRun{std::wstring(1, ch), style, color});
+    Tidy(s);
+}
+
+void TextErase(Shape& s, int position) {
+    int start = 0;
+    for (TextRun& r : s.runs) {
+        const int len = static_cast<int>(r.text.size());
+        if (position >= start && position < start + len) {
+            r.text.erase(static_cast<size_t>(position - start), 1);
+            break;
+        }
+        start += len;
+    }
+    Tidy(s);
+}
+
+bool TextLookAt(const Shape& s, int position, TextStyle& style, COLORREF& color) {
+    if (s.runs.empty()) return false;
+    const int target = std::max(0, position - 1);  // the letter before the cursor
+    int start = 0;
+    for (const TextRun& r : s.runs) {
+        const int len = static_cast<int>(r.text.size());
+        if (target < start + len) {
+            style = r.style;
+            color = r.color;
+            return true;
+        }
+        start += len;
+    }
+    style = s.runs.back().style;
+    color = s.runs.back().color;
+    return true;
+}
 
 void StartGraphics() {
     G::GdiplusStartupInput input;
@@ -469,7 +651,7 @@ void DrawShapes(HDC dc, const RECT& clip, POINT off, const std::vector<const Sha
             const Shape& s = *shapes[i];
             const TextStyle* cs = &s == caret.shape ? &caret.style : nullptr;
             if (s.erasures.empty()) {
-                DrawOne(lg, s, cs, caret.color, blur, scale);
+                DrawOne(lg, s, cs, caret.color, caret.index, blur, scale);
                 continue;
             }
             // A partly erased object is drawn on its own layer, then the erased parts are cleared.
@@ -478,7 +660,7 @@ void DrawShapes(HDC dc, const RECT& clip, POINT off, const std::vector<const Sha
                 G::Graphics og(&own);
                 Prepare(og);
                 og.TranslateTransform(tx, ty);
-                DrawOne(og, s, cs, caret.color, blur, scale);
+                DrawOne(og, s, cs, caret.color, caret.index, blur, scale);
                 og.SetCompositingMode(G::CompositingModeSourceCopy);
                 const G::Color clear(0, 0, 0, 0);
                 for (const Erasure& e : s.erasures) DrawPath(og, e.points, e.width, clear);

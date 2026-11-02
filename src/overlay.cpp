@@ -88,6 +88,7 @@ struct Overlay {
     Pt lastErase = {};
 
     int typing = -1;             // index of the text being typed, -1 = none
+    int caret = 0;               // text cursor position in that text
     bool typingChanged = false;
 
     int picked = -1;             // object chosen with the selection tool, -1 = none
@@ -463,6 +464,7 @@ Caret CurrentCaret(const Overlay& o) {
         c.shape = &o.shapes[o.typing];
         c.style = o.textStyle;
         c.color = o.color;
+        c.index = o.caret;
     }
     return c;
 }
@@ -524,13 +526,25 @@ void TakeLookFrom(Overlay& o, const TextStyle& style, COLORREF color) {
     }
 }
 
-void BeginTyping(Overlay& o, int index) {
+// Puts the text cursor at a position; typing continues in the look of the letter before it.
+void SetCaret(Overlay& o, int position) {
+    if (o.typing < 0) return;
+    ChromeChange change(o);
+    InvalidateTyping(o);
+    const Shape& s = o.shapes[o.typing];
+    o.caret = std::clamp(position, 0, TextLength(s));
+    TextStyle style;
+    COLORREF color;
+    if (TextLookAt(s, o.caret, style, color)) TakeLookFrom(o, style, color);
+    InvalidateTyping(o);
+}
+
+// caret: cursor position, -1 = at the end of the text.
+void BeginTyping(Overlay& o, int index, int caret = -1) {
     ChromeChange change(o);
     o.typing = index;
     o.typingChanged = false;
-    const Shape& s = o.shapes[index];
-    if (!s.runs.empty()) TakeLookFrom(o, s.runs.back().style, s.runs.back().color);
-    InvalidateTyping(o);
+    SetCaret(o, caret < 0 ? TextLength(o.shapes[index]) : caret);
 }
 
 int TextAt(const Overlay& o, POINT p) {
@@ -540,13 +554,18 @@ int TextAt(const Overlay& o, POINT p) {
     return -1;
 }
 
-// Text tool click: open the text under the mouse, or start a new one.
+// Text tool click: move the cursor inside the text being typed, open the text under the mouse with
+// the cursor where it was clicked, or start a new text.
 void StartText(Overlay& o, POINT p) {
+    if (o.typing >= 0 && TextAt(o, p) == o.typing) {
+        SetCaret(o, TextPositionAt(o.shapes[o.typing], ToPt(p)));
+        return;
+    }
     CommitText(o);
     const int existing = TextAt(o, p);
     Checkpoint(o);
     if (existing >= 0) {
-        BeginTyping(o, existing);
+        BeginTyping(o, existing, TextPositionAt(o.shapes[existing], ToPt(p)));
         return;
     }
     Shape s;
@@ -562,18 +581,17 @@ void TypeChar(Overlay& o, wchar_t ch) {
     ChromeChange change(o);
     InvalidateTyping(o);
     Shape& s = o.shapes[o.typing];
-    if (ch == L'\b') {
-        while (!s.runs.empty() && s.runs.back().text.empty()) s.runs.pop_back();
-        if (!s.runs.empty()) {
-            s.runs.back().text.pop_back();
-            if (s.runs.back().text.empty()) s.runs.pop_back();
+    if (ch == L'\b') {  // Backspace: the letter before the cursor
+        if (o.caret > 0) {
+            TextErase(s, o.caret - 1);
+            --o.caret;
         }
+    } else if (ch == 127) {  // Delete: the letter after the cursor
+        TextErase(s, o.caret);
     } else {
         // New letters take the look chosen now; letters typed before keep theirs.
-        if (s.runs.empty() || s.runs.back().style != o.textStyle || s.runs.back().color != o.color) {
-            s.runs.push_back(TextRun{L"", o.textStyle, o.color});
-        }
-        s.runs.back().text.push_back(ch);
+        TextInsert(s, o.caret, ch, o.textStyle, o.color);
+        ++o.caret;
     }
     o.typingChanged = true;
     InvalidateTyping(o);
@@ -752,9 +770,18 @@ void EndStroke(Overlay& o) {
     if (!o.drawing) return;
     ChromeChange change(o);  // the undo button becomes active
     o.drawing = false;
+    if (GetCapture() == o.hwnd) ReleaseCapture();
+    // A click without dragging makes no arrow, rectangle, ellipse or blur: such an invisible object
+    // could later be picked by mistake.
+    if (IsTwoPointTool(o.current.tool)) {
+        const Pt a = o.current.points[0], b = o.current.points[1];
+        if (std::fabs(a.x - b.x) < 2 && std::fabs(a.y - b.y) < 2) {
+            InvalidateShape(o, o.current);
+            return;
+        }
+    }
     Checkpoint(o);
     o.shapes.push_back(o.current);
-    if (GetCapture() == o.hwnd) ReleaseCapture();
 }
 
 // ---------- Eraser ----------
@@ -904,6 +931,10 @@ void PickMouseMove(Overlay& o, POINT p) {
 }
 
 void PickMouseUp(Overlay& o) {
+    // A click on a text (without dragging) puts the text cursor there.
+    if (!o.pickChanged && o.picked >= 0 && o.picked == o.typing) {
+        SetCaret(o, TextPositionAt(o.shapes[o.typing], ToPt(o.dragStart)));
+    }
     o.pickDrag = Drag::None;
     if (GetCapture() == o.hwnd) ReleaseCapture();
     ChromeChange change(o);  // undo button
@@ -1219,6 +1250,17 @@ void Finish(Overlay&) { FinishSession(); }
 
 bool CreateOverlayWindow(HINSTANCE instance, HMONITOR monitor, bool picking);
 
+// Other monitors are frozen too, so the next area can be taken there.
+void FreezeOtherMonitors() {
+    for (HMONITOR m : AllMonitors()) {
+        const bool open = std::any_of(g_overlays.begin(), g_overlays.end(), [&](const Overlay* x) {
+            return MonitorFromRect(&x->shot.bounds, MONITOR_DEFAULTTONULL) == m;
+        });
+        if (!open) CreateOverlayWindow(GetModuleHandleW(nullptr), m, false);
+    }
+    for (Overlay* x : g_overlays) InvalidateRect(x->hwnd, nullptr, FALSE);  // new hint "area N of 4"
+}
+
 // Keeps the current selection as one part of a side-by-side picture and lets the user select the next
 // one, on this or another monitor.
 void AddArea(Overlay& o) {
@@ -1229,14 +1271,29 @@ void AddArea(Overlay& o) {
     o.picked = -1;
     o.tool = Tool::Area;
     InvalidateRect(o.hwnd, nullptr, FALSE);
-    // Other monitors are frozen now too, so the next area can be taken there.
-    for (HMONITOR m : AllMonitors()) {
-        const bool open = std::any_of(g_overlays.begin(), g_overlays.end(), [&](const Overlay* x) {
-            return MonitorFromRect(&x->shot.bounds, MONITOR_DEFAULTTONULL) == m;
-        });
-        if (!open) CreateOverlayWindow(GetModuleHandleW(nullptr), m, false);
+    FreezeOtherMonitors();
+}
+
+void KeepSelection(Overlay& o);
+
+// Ctrl + drag outside the areas: the next area of a side-by-side picture, whatever tool is chosen.
+// The current tool stays, so drawing can continue right after.
+bool StartAreaWithCtrl(Overlay& o, POINT p) {
+    if (AreaCount() == 0 || InAnyArea(o, p)) return false;
+    for (Overlay* x : g_overlays) {
+        CommitText(*x);
+        x->picked = -1;
     }
-    for (Overlay* x : g_overlays) InvalidateRect(x->hwnd, nullptr, FALSE);  // new hint "area N of 4"
+    if (AreaCount() >= kMaxAreas) return true;  // already 4 areas: ignore the click
+    for (Overlay* x : g_overlays) KeepSelection(*x);
+    FreezeOtherMonitors();
+    SetCapture(o.hwnd);
+    o.dragStart = p;
+    o.selectionAtStart = o.selection;
+    o.moved = false;
+    o.creatingNew = true;
+    o.drag = Drag::Create;
+    return true;
 }
 
 void OnPanelClick(Overlay& o, int id) {
@@ -1461,6 +1518,20 @@ void OnKeyDown(Overlay& o, WPARAM key) {
             ChangeTextStyle(o, [](TextStyle& t) { t.italic = !t.italic; });
         } else if (ctrl && key == 'Z') {
             Undo(o);
+        } else if (key == VK_DELETE) {
+            TypeChar(o, 127);
+        } else if (key == VK_LEFT) {
+            SetCaret(o, o.caret - 1);
+        } else if (key == VK_RIGHT) {
+            SetCaret(o, o.caret + 1);
+        } else if (key == VK_HOME) {
+            SetCaret(o, TextMoveOnLine(o.shapes[o.typing], o.caret, -2));
+        } else if (key == VK_END) {
+            SetCaret(o, TextMoveOnLine(o.shapes[o.typing], o.caret, 2));
+        } else if (key == VK_UP) {
+            SetCaret(o, TextMoveOnLine(o.shapes[o.typing], o.caret, -1));
+        } else if (key == VK_DOWN) {
+            SetCaret(o, TextMoveOnLine(o.shapes[o.typing], o.caret, 1));
         }
         return;  // letters arrive as WM_CHAR
     }
@@ -1489,7 +1560,7 @@ void OnChar(Overlay& o, wchar_t ch) {
     TypeChar(o, ch);
 }
 
-void OnMouseDown(Overlay& o, POINT p) {
+void OnMouseDown(Overlay& o, POINT p, bool ctrl) {
     if (o.picking) return;
     const int id = PanelHit(o, p);
     if (id != toolbar::kNone) {
@@ -1497,6 +1568,7 @@ void OnMouseDown(Overlay& o, POINT p) {
         return;
     }
     SetFocus(o.hwnd);
+    if (ctrl && StartAreaWithCtrl(o, p)) return;
     if (o.tool != Tool::Area && o.tool != Tool::Select && !InAnyArea(o, p)) {
         CommitText(o);  // drawing outside the selection would not be seen or saved
         return;
@@ -1572,7 +1644,7 @@ LRESULT CALLBACK OverlayProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case WM_ERASEBKGND:
             return 1;
         case WM_LBUTTONDOWN:
-            OnMouseDown(*o, p);
+            OnMouseDown(*o, p, (wp & MK_CONTROL) != 0);
             return 0;
         case WM_MOUSEMOVE:
             OnMouseMove(*o, p);
@@ -1584,7 +1656,7 @@ LRESULT CALLBACK OverlayProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             if (!o->picking && o->tool == Tool::Area && HitTest(*o, p) == Inside) {
                 Finish(*o);
             } else {
-                OnMouseDown(*o, p);  // in drawing tools a fast second click is just another click
+                OnMouseDown(*o, p, (wp & MK_CONTROL) != 0);  // in drawing tools a fast second click is just a click
             }
             return 0;
         case WM_RBUTTONUP:

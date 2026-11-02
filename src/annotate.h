@@ -91,7 +91,25 @@ struct Caret {
     const Shape* shape = nullptr;
     TextStyle style;
     COLORREF color = 0;
+    int index = -1;  // position in the text, -1 = at the end
 };
+
+// ---------- Editing text at the cursor ----------
+// Positions count letters from the start of the whole text (all pieces together), 0..TextLength.
+
+int TextLength(const Shape& text);
+
+// Cursor position nearest to point p (a click inside the text).
+int TextPositionAt(const Shape& text, Pt p);
+
+// Cursor position on the line above (-1) or below (+1), or the start (-2) / end (+2) of the line.
+int TextMoveOnLine(const Shape& text, int position, int how);
+
+void TextInsert(Shape& text, int position, wchar_t ch, const TextStyle& style, COLORREF color);
+void TextErase(Shape& text, int position);  // removes the letter at position
+
+// Look of the letter just before the position (or the first letter). False for an empty text.
+bool TextLookAt(const Shape& text, int position, TextStyle& style, COLORREF& color);
 
 // Blurred copies of the screenshot, one per strength (size button). Blur objects show a piece of them.
 struct BlurSource {
