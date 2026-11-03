@@ -8,13 +8,18 @@
 #include <objbase.h>
 #include <shellapi.h>
 
+#include <commctrl.h>
+
+#include <cwchar>
 #include <string>
 
 #include "annotate.h"
 #include "app.h"
 #include "autostart.h"
+#include "config.h"
 #include "i18n.h"
 #include "overlay.h"
+#include "settings.h"
 
 namespace {
 
@@ -24,28 +29,44 @@ const wchar_t kMutexName[] = L"Local\\OscreenSaver.SingleInstance";
 constexpr UINT WM_APP_CAPTURE = WM_APP + 1;
 constexpr UINT WM_APP_TRAY = WM_APP + 2;
 constexpr UINT WM_APP_OVERLAY_KEY = WM_APP + 3;
+constexpr UINT WM_APP_SETTINGS_CHANGED = WM_APP + 4;
 constexpr UINT kTrayId = 1;
 
-enum MenuId : UINT { IdCapture = 100, IdAutostart, IdExit };
+enum MenuId : UINT { IdCapture = 100, IdAutostart, IdSettings, IdExit };
 
 HINSTANCE g_instance = nullptr;
 HWND g_main = nullptr;
 HHOOK g_keyboardHook = nullptr;
 UINT g_taskbarCreated = 0;
 std::wstring g_lastSaved;  // opened when the user clicks the "saved" notice
+bool g_hotkeySwallowed = false;  // the key-down of the screenshot key was taken: take its key-up too
 
-// Low-level keyboard hook: catches PrintScreen system-wide and stops Windows from handling it
-// (otherwise Windows 11 may open its own Snipping Tool). Only a message is posted here, so the
-// hook returns instantly and never slows down typing.
+bool KeyDown(int vk) { return (GetAsyncKeyState(vk) & 0x8000) != 0; }
+
+// True if Ctrl, Shift and Alt are pressed exactly as in the chosen shortcut.
+bool ModifiersMatch(UINT mods) {
+    return KeyDown(VK_CONTROL) == ((mods & HOTKEYF_CONTROL) != 0) && KeyDown(VK_SHIFT) == ((mods & HOTKEYF_SHIFT) != 0) &&
+           KeyDown(VK_MENU) == ((mods & HOTKEYF_ALT) != 0);
+}
+
+// Low-level keyboard hook: catches the screenshot shortcut (PrintScreen by default) system-wide and
+// stops other programs from handling it (otherwise Windows 11 may open its own Snipping Tool).
+// Only a message is posted here, so the hook returns instantly and never slows down typing.
 LRESULT CALLBACK KeyboardHook(int code, WPARAM wp, LPARAM lp) {
-    if (code == HC_ACTION) {
+    if (code == HC_ACTION && !IsSettingsOpen()) {  // in the settings window the shortcut is being typed
         const auto* key = reinterpret_cast<const KBDLLHOOKSTRUCT*>(lp);
         const bool down = wp == WM_KEYDOWN || wp == WM_SYSKEYDOWN;
-        if (key->vkCode == VK_SNAPSHOT) {
-            if (down) {
+        const Config& cfg = Cfg();
+        if (key->vkCode == cfg.hotkeyVk) {
+            if (down && ModifiersMatch(cfg.hotkeyMods)) {
+                g_hotkeySwallowed = true;
                 PostMessageW(g_main, WM_APP_CAPTURE, 0, 0);
+                return 1;
             }
-            return 1;  // swallow both key-down and key-up
+            if (!down && g_hotkeySwallowed) {
+                g_hotkeySwallowed = false;
+                return 1;  // the matching key-up
+            }
         }
         if ((key->vkCode == VK_ESCAPE || key->vkCode == VK_RETURN) && IsOverlayOpen() && !IsOverlayTyping()) {
             if (down) {
@@ -68,8 +89,10 @@ void AddTrayIcon() {
                                                       GetSystemMetrics(SM_CXSMICON),
                                                       GetSystemMetrics(SM_CYSMICON), LR_DEFAULTCOLOR));
     nid.hIcon = icon ? icon : LoadIconW(nullptr, IDI_APPLICATION);
-    lstrcpynW(nid.szTip, T(Str::TrayTooltip), ARRAYSIZE(nid.szTip));
-    Shell_NotifyIconW(NIM_ADD, &nid);
+    wchar_t tip[128];
+    swprintf(tip, 128, T(Str::TrayTooltipFmt), HotkeyName(Cfg().hotkeyVk, Cfg().hotkeyMods).c_str());
+    lstrcpynW(nid.szTip, tip, ARRAYSIZE(nid.szTip));
+    if (!Shell_NotifyIconW(NIM_MODIFY, &nid)) Shell_NotifyIconW(NIM_ADD, &nid);
 }
 
 void RemoveTrayIcon() {
@@ -98,7 +121,10 @@ void OpenSavedFolder() {
 
 void ShowTrayMenu() {
     HMENU menu = CreatePopupMenu();
-    AppendMenuW(menu, MF_STRING, IdCapture, T(Str::MenuCapture));
+    const std::wstring capture = std::wstring(T(Str::MenuCapture)) + L"\t" +
+                                 HotkeyName(Cfg().hotkeyVk, Cfg().hotkeyMods);
+    AppendMenuW(menu, MF_STRING, IdCapture, capture.c_str());
+    AppendMenuW(menu, MF_STRING, IdSettings, T(Str::MenuSettings));
     AppendMenuW(menu, MF_STRING | (IsAutostartEnabled() ? MF_CHECKED : MF_UNCHECKED), IdAutostart,
                 T(Str::MenuAutostart));
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
@@ -114,6 +140,7 @@ void ShowTrayMenu() {
     switch (cmd) {
         case IdCapture: PostMessageW(g_main, WM_APP_CAPTURE, 0, 0); break;
         case IdAutostart: SetAutostart(!IsAutostartEnabled()); break;
+        case IdSettings: ShowSettings(g_instance, g_main, WM_APP_SETTINGS_CHANGED); break;
         case IdExit: DestroyWindow(g_main); break;
     }
 }
@@ -122,6 +149,9 @@ LRESULT CALLBACK MainProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
         case WM_APP_CAPTURE:
             OpenOverlay(g_instance);
+            return 0;
+        case WM_APP_SETTINGS_CHANGED:
+            AddTrayIcon();  // the hint shows the new shortcut
             return 0;
         case WM_APP_OVERLAY_KEY:
             OverlayKey(static_cast<unsigned>(wp));
@@ -169,6 +199,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         return 0;
     }
 
+    LoadConfig();
     ApplyFirstRunAutostart();
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);  // needed for JPG encoding
     StartGraphics();                                    // smooth (anti-aliased) drawing
@@ -197,6 +228,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
 
     MSG msg;
     while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
+        if (SettingsDialogMessage(&msg)) continue;  // Tab, Enter and Esc in the settings window
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
     }

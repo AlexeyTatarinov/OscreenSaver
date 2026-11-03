@@ -21,6 +21,8 @@ enum class Str {
     TipSelect, TipEraseWhole, TipErasePart,
     TipBlur, TipAddArea, HintNextArea,
     TipFrames,
+    MenuSettings, SetTitle, SetGroupCapture, SetHotkey, SetHotkeyCustom, SetHotkeyHint, SetMagnifier,
+    SetGroupCompare, SetBackground, SetFrames, SetGroupGeneral, SetOk, SetCancel, TrayTooltipFmt,
 };
 
 void InitLanguage();

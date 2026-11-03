@@ -14,6 +14,7 @@
 #include "annotate.h"
 #include "app.h"
 #include "capture.h"
+#include "config.h"
 #include "i18n.h"
 #include "save.h"
 #include "toolbar.h"
@@ -38,7 +39,6 @@ struct Settings {
     TextStyle text;  // px stored at 100% screen scale
     int textSize = 1;
     bool eraseParts = false;
-    bool frames = true;  // thin grey frame around each part of a joined picture
 };
 Settings g_settings;
 bool g_dialogOpen = false;  // colour or font window is open: Esc/Enter belong to it
@@ -313,7 +313,7 @@ toolbar::State PanelState(const Overlay& o) {
     st.canRedo = !o.redo.empty();
     st.canAddArea = o.hasSelection && AreaCount() < kMaxAreas;
     st.compare = CompareMode();
-    st.frames = g_settings.frames;
+    st.frames = Cfg().frames;
     st.hover = o.hover;
     st.dark = o.dark;
     return st;
@@ -364,6 +364,46 @@ RECT EraserCircleRect(const Overlay& o) {
     return RECT{o.mouse.x - r, o.mouse.y - r, o.mouse.x + r + 1, o.mouse.y + r + 1};
 }
 
+// ---------- Magnifier (optional, in the settings) ----------
+// While choosing an area, a box next to the cursor shows the pixels under it enlarged, the position
+// and the colour, so an area can be selected exactly to the pixel.
+
+constexpr int kMagPixels = 15;  // pixels across (odd: the middle one is under the cursor)
+
+int MagCell(const Overlay& o) { return std::max(6, static_cast<int>(8 * o.scale + 0.5f)); }
+
+bool MagnifierVisible(const Overlay& o) {
+    if (!Cfg().magnifier || o.picking || o.tool != Tool::Area) return false;
+    const RECT all = ClientRect(o);
+    return PtInRect(&all, o.mouse) && PanelHit(o, o.mouse) == toolbar::kNone;
+}
+
+// The zoomed square and, under it, the label with position and colour.
+void MagnifierLayout(const Overlay& o, RECT& zoom, RECT& label) {
+    const int size = kMagPixels * MagCell(o);
+    const int gap = static_cast<int>(20 * o.scale);
+    // The label fits the longest possible text, so its size does not jump while the mouse moves.
+    SIZE text = {0, 0};
+    GetTextExtentPoint32W(o.backDc, L"X 0000  Y 0000   #000000", 24, &text);
+    const int labelW = std::max(size, static_cast<int>(text.cx + 20 * o.scale));
+    const int labelH = static_cast<int>(text.cy + 10 * o.scale);
+    const int width = labelW;
+    int x = o.mouse.x + gap, y = o.mouse.y + gap;
+    if (x + width > o.shot.Width()) x = o.mouse.x - gap - width;  // flip to the other side at the edges
+    if (y + size + labelH > o.shot.Height()) y = o.mouse.y - gap - size - labelH;
+    zoom = RECT{x, y, x + size, y + size};
+    label = RECT{x, y + size + static_cast<int>(2 * o.scale), x + labelW, y + size + static_cast<int>(2 * o.scale) + labelH};
+}
+
+RECT MagnifierRect(const Overlay& o) {
+    if (!MagnifierVisible(o)) return RECT{0, 0, 0, 0};
+    RECT zoom, label;
+    MagnifierLayout(o, zoom, label);
+    RECT r = Union(zoom, label);
+    InflateRect(&r, 2, 2);
+    return r;
+}
+
 // Frame around the object chosen with the selection tool.
 RECT PickFrame(const Overlay& o) {
     if (o.picked < 0 || o.picked >= static_cast<int>(o.shapes.size())) return RECT{0, 0, 0, 0};
@@ -385,7 +425,7 @@ RECT ChromeRect(const Overlay& o) {
     if (o.picking) return RECT{0, 0, 0, 0};
     RECT r;
     if (!o.hasSelection) {
-        r = TextBox(o, HintText().c_str(), HintAnchor(o), true);
+        r = Union(TextBox(o, HintText().c_str(), HintAnchor(o), true), MagnifierRect(o));
     } else {
         r = o.selection;
         InflateRect(&r, Scaled(o, 6), Scaled(o, 6));
@@ -397,6 +437,7 @@ RECT ChromeRect(const Overlay& o) {
     }
     r = Union(r, EraserCircleRect(o));
     r = Union(r, PickFrameArea(o));
+    r = Union(r, MagnifierRect(o));
     return r;
 }
 
@@ -1052,6 +1093,60 @@ void DrawEraserCircle(const Overlay& o, HDC dc) {
     DeleteObject(light);
 }
 
+void DrawMagnifier(const Overlay& o, HDC dc) {
+    RECT zoom, label;
+    MagnifierLayout(o, zoom, label);
+    const int cell = MagCell(o);
+    const int half = kMagPixels / 2;
+    // Enlarged pixels of the clear screenshot (edges outside the screen stay black).
+    HBRUSH black = static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH));
+    FillRect(dc, &zoom, black);
+    const int sx = o.mouse.x - half, sy = o.mouse.y - half;
+    const int l = std::max(0, sx), t = std::max(0, sy);
+    const int r = std::min(o.shot.Width(), sx + kMagPixels), b = std::min(o.shot.Height(), sy + kMagPixels);
+    if (r > l && b > t) {
+        SetStretchBltMode(dc, COLORONCOLOR);  // sharp pixels, no smoothing
+        StretchBlt(dc, zoom.left + (l - sx) * cell, zoom.top + (t - sy) * cell, (r - l) * cell, (b - t) * cell,
+                   o.shotDc, l, t, r - l, b - t, SRCCOPY);
+    }
+    // Thin pixel grid and the pixel under the cursor.
+    HPEN grid = CreatePen(PS_SOLID, 1, RGB(90, 90, 90));
+    HGDIOBJ oldPen = SelectObject(dc, grid);
+    const int oldRop = SetROP2(dc, R2_MASKPEN);
+    for (int i = 1; i < kMagPixels; ++i) {
+        MoveToEx(dc, zoom.left + i * cell, zoom.top, nullptr);
+        LineTo(dc, zoom.left + i * cell, zoom.bottom);
+        MoveToEx(dc, zoom.left, zoom.top + i * cell, nullptr);
+        LineTo(dc, zoom.right, zoom.top + i * cell);
+    }
+    SetROP2(dc, oldRop);
+    HGDIOBJ oldBrush = SelectObject(dc, GetStockObject(NULL_BRUSH));
+    const RECT mid = {zoom.left + half * cell, zoom.top + half * cell, zoom.left + (half + 1) * cell,
+                      zoom.top + (half + 1) * cell};
+    SelectObject(dc, GetStockObject(WHITE_PEN));
+    Rectangle(dc, mid.left - 1, mid.top - 1, mid.right + 1, mid.bottom + 1);
+    SelectObject(dc, GetStockObject(BLACK_PEN));
+    Rectangle(dc, mid.left, mid.top, mid.right, mid.bottom);
+    HPEN frame = CreatePen(PS_SOLID, std::max(1, o.unit), o.accent);
+    SelectObject(dc, frame);
+    Rectangle(dc, zoom.left, zoom.top, zoom.right, zoom.bottom);
+    SelectObject(dc, oldBrush);
+    SelectObject(dc, oldPen);
+    DeleteObject(grid);
+    DeleteObject(frame);
+
+    // Position (on this monitor) and colour of the pixel under the cursor.
+    COLORREF c = RGB(0, 0, 0);
+    if (o.mouse.x >= 0 && o.mouse.y >= 0 && o.mouse.x < o.shot.Width() && o.mouse.y < o.shot.Height()) {
+        const uint32_t px = o.shot.pixels[static_cast<size_t>(o.mouse.y) * o.shot.Width() + o.mouse.x];
+        c = RGB((px >> 16) & 0xFF, (px >> 8) & 0xFF, px & 0xFF);
+    }
+    wchar_t text[64];
+    swprintf(text, 64, L"X %ld  Y %ld   #%02X%02X%02X", o.mouse.x, o.mouse.y, GetRValue(c), GetGValue(c),
+             GetBValue(c));
+    toolbar::DrawLabel(dc, label, text, o.dark, o.scale);
+}
+
 void Paint(Overlay& o) {
     PAINTSTRUCT ps;
     HDC dc = BeginPaint(o.hwnd, &ps);
@@ -1100,6 +1195,7 @@ void Paint(Overlay& o) {
             }
         }
     }
+    if (MagnifierVisible(o)) DrawMagnifier(o, o.backDc);
     RestoreDC(o.backDc, saved);
 
     BitBlt(dc, p.left, p.top, w, h, o.backDc, p.left, p.top, SRCCOPY);
@@ -1170,7 +1266,11 @@ bool JoinPictures(std::vector<Snapshot>& parts, Snapshot& out) {
         height += rowH[r];
     }
     if (!CreateBlankSnapshot(width, height, out)) return false;
-    std::fill(out.pixels, out.pixels + static_cast<size_t>(width) * height, 0x00000000u);
+    // Background colour from the settings (black by default), in the picture's BGR pixel order.
+    const COLORREF bg = Cfg().background;
+    const uint32_t fill = (static_cast<uint32_t>(GetRValue(bg)) << 16) | (static_cast<uint32_t>(GetGValue(bg)) << 8) |
+                          GetBValue(bg);
+    std::fill(out.pixels, out.pixels + static_cast<size_t>(width) * height, fill);
     int top = 0;
     for (size_t r = 0; r < rows.size(); ++r) {
         int x = (width - rowW[r]) / 2;
@@ -1215,7 +1315,7 @@ void FinishSession() {
     for (const Piece& a : areas) {
         Snapshot part;
         if (ComposeArea(*a.owner, a.area, part)) {
-            if (areas.size() > 1 && g_settings.frames) AddFrame(part, std::max(1, a.owner->unit));
+            if (areas.size() > 1 && Cfg().frames) AddFrame(part, std::max(1, a.owner->unit));
             parts.push_back(part);
         }
     }
@@ -1313,7 +1413,8 @@ void OnPanelClick(Overlay& o, int id) {
     else if (id == kAddArea) AddArea(o);
     else if (id == kFrames) {
         ChromeChange change(o);
-        g_settings.frames = !g_settings.frames;
+        Cfg().frames = !Cfg().frames;
+        SaveConfig();
     }
     else if (id == kSave) Finish(o);
     else if (id == kClose) CloseAll();
@@ -1740,6 +1841,10 @@ bool CreateOverlayWindow(HINSTANCE instance, HMONITOR monitor, bool picking) {
         g_overlays.erase(std::remove(g_overlays.begin(), g_overlays.end(), o), g_overlays.end());
         FreeOverlay(o);
         return false;
+    }
+    POINT cursor;
+    if (GetCursorPos(&cursor)) {
+        o->mouse = POINT{cursor.x - b.left, cursor.y - b.top};  // the magnifier starts at the cursor
     }
     ShowWindow(hwnd, SW_SHOW);
     return true;
