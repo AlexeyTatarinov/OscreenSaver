@@ -18,7 +18,7 @@ if(MSVC)
     add_link_options(/MANIFEST:NO)
 else()
     add_compile_options(-Wall -Wextra -Wno-missing-field-initializers -finput-charset=UTF-8)
-    add_link_options(-static -municode -mwindows)
+    add_link_options(-static)
 endif()
 
 add_compile_definitions(UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX _WIN32_WINNT=0x0A00)
@@ -46,3 +46,14 @@ if(MSVC)
 endif()
 
 target_link_libraries(OscreenSaver PRIVATE user32 gdi32 shell32 advapi32 shcore ole32 oleaut32 windowscodecs uuid gdiplus comdlg32 comctl32 dwmapi)
+
+# Groundwork for the long screenshot with scrolling: picture stitching and its test.
+add_library(scroll_stitch STATIC src/scroll_stitch.cpp)
+target_link_libraries(OscreenSaver PRIVATE scroll_stitch)
+enable_testing()
+add_executable(stitch_test tests/stitch_test.cpp)
+target_link_libraries(stitch_test PRIVATE scroll_stitch)
+if(NOT MSVC)
+    target_link_options(OscreenSaver PRIVATE -municode -mwindows)
+endif()
+add_test(NAME stitch_test COMMAND stitch_test)

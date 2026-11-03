@@ -104,6 +104,7 @@ struct Overlay {
     POINT mouse = {-10000, -10000};
     int hover = toolbar::kNone;
     RECT hoverWindow = {};  // window under the cursor, shown with a frame in area mode
+    bool ctrlDown = false;  // Ctrl held: a new area can be selected with any tool
     std::wstring flash;     // short message near the cursor (eyedropper)
     RECT flashBox = {};
     bool dark = true;
@@ -207,6 +208,11 @@ RECT WindowAt(const Overlay& o, POINT p) {
 // ---------- Areas for the side-by-side picture ----------
 
 bool CompareMode() { return !g_pieces.empty(); }
+
+bool AnyAreaExists() {
+    if (!g_pieces.empty()) return true;
+    return std::any_of(g_overlays.begin(), g_overlays.end(), [](const Overlay* x) { return x->hasSelection; });
+}
 
 int AreaCount() {
     int n = static_cast<int>(g_pieces.size());
@@ -420,9 +426,20 @@ constexpr int kMagPixels = 15;  // pixels across (odd: the middle one is under t
 
 int MagCell(const Overlay& o) { return std::max(6, static_cast<int>(8 * o.scale + 0.5f)); }
 
+bool InAnyArea(const Overlay& o, POINT p);
+bool AnyAreaExists();
+int KeptAreaAt(const Overlay& o, POINT p);
+
+// True while an area is being chosen: area mode, dragging a new area, or Ctrl held outside the areas
+// (Ctrl + drag makes the next area with any tool).
+bool ChoosingArea(const Overlay& o) {
+    if (o.tool == Tool::Area || o.drag == Drag::Create) return true;
+    return o.ctrlDown && AnyAreaExists() && !InAnyArea(o, o.mouse);
+}
+
 bool MagnifierVisible(const Overlay& o) {
     if (o.picking) return false;
-    if (o.tool != Tool::Picker && (!Cfg().magnifier || o.tool != Tool::Area)) return false;
+    if (o.tool != Tool::Picker && (!Cfg().magnifier || !ChoosingArea(o))) return false;
     const RECT all = ClientRect(o);
     return PtInRect(&all, o.mouse) && PanelHit(o, o.mouse) == toolbar::kNone;
 }
@@ -1868,19 +1885,35 @@ void OnMouseDown(Overlay& o, POINT p, bool ctrl) {
     }
 }
 
+// While an area is being chosen, the window under the cursor is framed: a click selects it.
+void UpdateHoverWindow(Overlay& o) {
+    const POINT p = o.mouse;
+    const bool busy = o.drawing || o.erasing || o.drag != Drag::None || o.pickDrag != Drag::None;
+    RECT window = {};
+    const bool choosing = o.tool == Tool::Area || (o.ctrlDown && AnyAreaExists());
+    if (choosing && !busy && !o.picking && PanelHit(o, p) == toolbar::kNone &&
+        (o.tool == Tool::Area ? HitTest(o, p) == Outside : !InAnyArea(o, p)) && KeptAreaAt(o, p) < 0) {
+        window = WindowAt(o, p);
+    }
+    o.hoverWindow = window;
+}
+
+// Ctrl pressed or released: the magnifier and the window frame appear or disappear at once.
+void OnCtrlChanged(Overlay& o, bool down) {
+    if (o.ctrlDown == down) return;
+    ChromeChange change(o);
+    o.ctrlDown = down;
+    UpdateHoverWindow(o);
+}
+
 void OnMouseMove(Overlay& o, POINT p) {
     {
         ChromeChange change(o);  // hint under the mouse and the eraser circle follow the mouse
         o.mouse = p;
         const bool busy = o.drawing || o.erasing || o.drag != Drag::None || o.pickDrag != Drag::None;
         o.hover = busy ? toolbar::kNone : PanelHit(o, p);
-        // In area mode the window under the cursor is framed: a click selects it.
-        RECT window = {};
-        if (o.tool == Tool::Area && !busy && !o.picking && o.hover == toolbar::kNone && HitTest(o, p) == Outside &&
-            KeptAreaAt(o, p) < 0) {
-            window = WindowAt(o, p);
-        }
-        o.hoverWindow = window;
+        o.ctrlDown = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+        UpdateHoverWindow(o);
     }
     if (o.drawing) {
         ContinueStroke(o, p);
@@ -1953,7 +1986,11 @@ LRESULT CALLBACK OverlayProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             o->drag = Drag::None;
             return 0;
         case WM_KEYDOWN:
+            if (wp == VK_CONTROL) OnCtrlChanged(*o, true);
             OnKeyDown(*o, wp);
+            return 0;
+        case WM_KEYUP:
+            if (wp == VK_CONTROL) OnCtrlChanged(*o, false);
             return 0;
         case WM_CHAR:
             OnChar(*o, static_cast<wchar_t>(wp));

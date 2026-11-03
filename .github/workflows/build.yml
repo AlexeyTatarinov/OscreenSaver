@@ -18,6 +18,9 @@ jobs:
       - name: Build
         run: cmake --build build --config Release
 
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+
       - name: Upload OscreenSaver.exe
         uses: actions/upload-artifact@v4
         with:
