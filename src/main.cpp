@@ -61,8 +61,8 @@ LRESULT CALLBACK KeyboardHook(int code, WPARAM wp, LPARAM lp) {
     if (code == HC_ACTION && !IsSettingsOpen()) {  // in the settings window the shortcut is being typed
         const auto* key = reinterpret_cast<const KBDLLHOOKSTRUCT*>(lp);
         const bool down = wp == WM_KEYDOWN || wp == WM_SYSKEYDOWN;
-        if (key->vkCode == VK_ESCAPE && IsLongShotRunning()) {
-            if (wp == WM_KEYDOWN) StopLongShot();  // keep what was captured so far
+        if ((key->vkCode == VK_ESCAPE || key->vkCode == VK_RETURN) && IsLongShotRunning()) {
+            if (wp == WM_KEYDOWN) StopLongShot();  // finish and keep what was captured so far
             return 1;
         }
         const Config& cfg = Cfg();

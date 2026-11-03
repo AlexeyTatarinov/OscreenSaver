@@ -3,6 +3,7 @@
 // must be exactly the top bar + the whole page + the bottom bar.
 
 #include <cstdint>
+#include <algorithm>
 #include <cstdio>
 #include <random>
 #include <vector>
@@ -42,7 +43,22 @@ std::vector<uint32_t> View(const std::vector<uint32_t>& page, const std::vector<
     return v;
 }
 
-void RunCase(int headerH, int footerH, std::vector<int> steps, const char* name) {
+// Small random changes like smooth text edges after scrolling.
+void AddNoise(std::vector<uint32_t>& px, unsigned seed) {
+    std::mt19937 rng(seed);
+    for (uint32_t& p : px) {
+        if (rng() % 5 == 0) {
+            const int d = static_cast<int>(rng() % 7) - 3;
+            auto ch = [&](int shift) {
+                const int v = std::clamp(static_cast<int>((p >> shift) & 0xFF) + d, 0, 255);
+                return static_cast<uint32_t>(v) << shift;
+            };
+            p = ch(16) | ch(8) | ch(0);
+        }
+    }
+}
+
+void RunCase(int headerH, int footerH, std::vector<int> steps, const char* name, bool noise = false) {
     const int width = 64, pageH = 900, viewH = 240;
     const auto page = MakeRows(width, pageH, 7);
     const auto header = MakeRows(width, headerH, 11);
@@ -57,6 +73,7 @@ void RunCase(int headerH, int footerH, std::vector<int> steps, const char* name)
         const int step = steps[i % steps.size()];
         offset = std::min(offset + step, pageH - contentH);  // the page stops at its end
         auto next = View(page, header, footer, width, headerH, footerH, viewH, offset);
+        if (noise) AddNoise(next, static_cast<unsigned>(100 + i));
         const auto r = stitcher.Add(scroll::Frame{next.data(), width, viewH});
         if (r == scroll::Stitcher::Result::EndReached) ended = true;
         if (r == scroll::Stitcher::Result::NoMatch) {
@@ -69,6 +86,11 @@ void RunCase(int headerH, int footerH, std::vector<int> steps, const char* name)
     std::vector<uint32_t> expected = header;
     expected.insert(expected.end(), page.begin(), page.end());
     expected.insert(expected.end(), footer.begin(), footer.end());
+    if (noise) {
+        // With noise only the size and the order of the content can be checked.
+        Check(w == width && h == headerH + pageH + footerH, name);
+        return;
+    }
     Check(w == width && h == headerH + pageH + footerH && result == expected, name);
 }
 
@@ -78,6 +100,7 @@ int main() {
     RunCase(20, 15, {57}, "fixed top and bottom bars, even steps");
     RunCase(0, 0, {40, 73, 19, 120}, "no bars, uneven steps");
     RunCase(32, 0, {100}, "top bar only, large steps");
+    RunCase(20, 15, {57, 90}, "small pixel differences after scrolling", true);
 
     // Two identical pictures: nothing moved.
     const auto a = MakeRows(32, 100, 3);

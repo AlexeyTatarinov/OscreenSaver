@@ -36,7 +36,8 @@ FixedBands FindFixedBands(const Frame& before, const Frame& after);
 
 // How many pixels the content between the fixed bands moved up from `before` to `after`.
 // Returns -1 if no reliable match was found (for example, the window jumped or changed).
-int FindScroll(const Frame& before, const Frame& after, const FixedBands& bands);
+// `expected` (or 0) is the likely shift, used only to choose between equally good matches.
+int FindScroll(const Frame& before, const Frame& after, const FixedBands& bands, int expected = 0);
 
 // Builds one tall picture from pictures taken while scrolling down.
 class Stitcher {

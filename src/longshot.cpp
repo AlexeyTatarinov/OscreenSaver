@@ -15,11 +15,17 @@ namespace {
 const wchar_t kStatusClass[] = L"OscreenSaver.LongShot";
 constexpr UINT WM_LS_PROGRESS = WM_APP + 20;  // wParam = height so far
 constexpr UINT WM_LS_FINISH = WM_APP + 21;    // lParam = LongShotResult*
+constexpr UINT WM_LS_MODE = WM_APP + 22;      // wParam = Mode
 
 constexpr int kMaxHeight = 30000;   // pixels; protects memory on endless pages
 constexpr int kMaxSteps = 600;
 constexpr DWORD kRedrawWait = 280;  // ms after a scroll before taking the next picture
 constexpr DWORD kExtraWait = 450;   // one more wait when the page seems to stop or jump
+
+// Auto: the program turns the wheel itself. Manual: the window did not react to that (some programs
+// ignore it), so the user scrolls with the wheel and the program takes pictures while they do.
+enum Mode : WPARAM { Auto = 0, Manual = 1, ManualTooFast = 2 };
+Mode g_mode = Auto;
 
 std::atomic<bool> g_running{false};
 std::atomic<bool> g_stop{false};
@@ -80,33 +86,64 @@ void Work(RECT area, HWND status) {
     GetCursorPos(&oldCursor);
     const POINT center = {(area.left + area.right) / 2, (area.top + area.bottom) / 2};
 
-    WaitOrStop(250);  // the frozen screen has just closed: let the windows under it redraw
+    WaitOrStop(400);  // the frozen screen has just closed: let the windows under it redraw
     std::vector<uint32_t> frame = Capture(area);
     scroll::Stitcher stitcher(scroll::Frame{frame.data(), w, h});
     PostMessageW(status, WM_LS_PROGRESS, static_cast<WPARAM>(h), 0);
 
+    auto add = [&](DWORD extraWait) {
+        frame = Capture(area);
+        auto r = stitcher.Add(scroll::Frame{frame.data(), w, h});
+        if (r != scroll::Stitcher::Result::Added && extraWait && !WaitOrStop(extraWait)) {
+            // Smooth scrolling may still be moving, or the page is loading: look once more.
+            frame = Capture(area);
+            r = stitcher.Add(scroll::Frame{frame.data(), w, h});
+        }
+        if (r == scroll::Stitcher::Result::Added) {
+            result->scrolled = true;
+            PostMessageW(status, WM_LS_PROGRESS, static_cast<WPARAM>(stitcher.Height()), 0);
+        }
+        return r;
+    };
+
+    // 1. Automatic: the wheel is turned at the middle of the area.
     int notches = 2;
+    bool automatic = true;
     for (int step = 0; step < kMaxSteps && !g_stop; ++step) {
         SetCursorPos(center.x, center.y);  // the wheel scrolls the window under the cursor
         WheelDown(notches);
         if (WaitOrStop(kRedrawWait)) break;
-        frame = Capture(area);
-        auto r = stitcher.Add(scroll::Frame{frame.data(), w, h});
+        const auto r = add(kExtraWait);
         if (r != scroll::Stitcher::Result::Added) {
-            // Smooth scrolling may still be moving, or the page is loading: look once more.
-            if (WaitOrStop(kExtraWait)) break;
-            frame = Capture(area);
-            r = stitcher.Add(scroll::Frame{frame.data(), w, h});
+            // At the very first step: the window ignores the wheel from a program -> manual mode.
+            // Later: the end of the page.
+            automatic = step == 0 ? false : automatic;
+            break;
         }
-        if (r != scroll::Stitcher::Result::Added) break;  // end of the page, or the content jumped
-        result->scrolled = true;
         // Next step: about half of the visible part, so pictures always overlap enough.
         const int perNotch = std::max(1, stitcher.LastShift() / notches);
         notches = std::clamp(stitcher.ContentHeight() / 2 / perNotch, 1, 10);
-        PostMessageW(status, WM_LS_PROGRESS, static_cast<WPARAM>(stitcher.Height()), 0);
         if (stitcher.Height() >= kMaxHeight) break;
     }
     SetCursorPos(oldCursor.x, oldCursor.y);
+
+    // 2. Manual: the user turns the wheel; a picture is taken several times a second.
+    if (!automatic && !g_stop) {
+        PostMessageW(status, WM_LS_MODE, Manual, 0);
+        DWORD idle = 0;
+        Mode shown = Manual;
+        while (!g_stop && idle < 120000 && stitcher.Height() < kMaxHeight) {
+            if (WaitOrStop(150)) break;
+            const auto r = add(0);
+            const Mode now = r == scroll::Stitcher::Result::NoMatch ? ManualTooFast : Manual;
+            if (now != shown) {
+                PostMessageW(status, WM_LS_MODE, now, 0);
+                shown = now;
+            }
+            idle = r == scroll::Stitcher::Result::Added ? 0 : idle + 150;
+        }
+    }
+
     result->pixels = stitcher.Picture(result->width, result->height);
     PostMessageW(status, WM_LS_FINISH, 0, reinterpret_cast<LPARAM>(result));
 }
@@ -114,8 +151,9 @@ void Work(RECT area, HWND status) {
 // ---------- Status window ----------
 
 std::wstring StatusText() {
-    wchar_t text[160];
-    swprintf(text, 160, T(Str::LongStatus), g_height);
+    wchar_t text[200];
+    const Str id = g_mode == Auto ? Str::LongStatus : g_mode == Manual ? Str::LongManual : Str::LongTooFast;
+    swprintf(text, 200, T(id), g_height);
     return text;
 }
 
@@ -123,6 +161,10 @@ LRESULT CALLBACK StatusProc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
         case WM_LS_PROGRESS:
             g_height = static_cast<int>(wp);
+            InvalidateRect(w, nullptr, FALSE);
+            return 0;
+        case WM_LS_MODE:
+            g_mode = static_cast<Mode>(wp);
             InvalidateRect(w, nullptr, FALSE);
             return 0;
         case WM_LS_FINISH:
@@ -180,7 +222,7 @@ HWND CreateStatus(const RECT& area) {
     GetMonitorInfoW(monitor, &mi);
     const RECT& wa = mi.rcWork;
     g_scale = GetDpiForSystem() / 96.f;
-    const int width = static_cast<int>(420 * g_scale), height = static_cast<int>(34 * g_scale);
+    const int width = static_cast<int>(560 * g_scale), height = static_cast<int>(36 * g_scale);
     const int gap = static_cast<int>(8 * g_scale);
     const int x = wa.left + (wa.right - wa.left - width) / 2;
     int y = wa.top + gap;  // top of the screen...
@@ -203,6 +245,7 @@ void StartLongShot(const RECT& area, HWND notify, UINT doneMessage) {
     if (g_running || area.right - area.left < 32 || area.bottom - area.top < 48) return;
     g_running = true;
     g_stop = false;
+    g_mode = Auto;
     g_notify = notify;
     g_doneMessage = doneMessage;
     g_height = area.bottom - area.top;

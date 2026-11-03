@@ -106,10 +106,12 @@ const wchar_t* const kStrings[][3] = {
     /* SetNameHint */ {L"%Y year, %m month, %d day, %H hour, %M minutes, %S seconds", L"%Y год, %m месяц, %d день, %H час, %M минуты, %S секунды", L"%Y рік, %m місяць, %d день, %H година, %M хвилини, %S секунди"},
     /* SetClipboardOnly */ {L"Do not save files, only copy to the clipboard (Enter)", L"Не сохранять файл, только копировать в буфер (Enter)", L"Не зберігати файл, лише копіювати в буфер (Enter)"},
     /* TipLong */ {L"Long screenshot with scrolling: select the part of a window that scrolls", L"Длинный снимок с прокруткой: выделите прокручиваемую часть окна", L"Довгий знімок із прокручуванням: виділіть частину вікна, що прокручується"},
-    /* LongStatus */ {L"Long screenshot: scrolling…  %d px  •  Esc — stop", L"Длинный снимок: прокрутка…  %d px  •  Esc — остановить", L"Довгий знімок: прокручування…  %d px  •  Esc — зупинити"},
+    /* LongStatus */ {L"Long screenshot: scrolling…  %d px  •  Esc or Enter — finish", L"Длинный снимок: прокрутка…  %d px  •  Esc или Enter — готово", L"Довгий знімок: прокручування…  %d px  •  Esc або Enter — готово"},
     /* LongDoneTitle */ {L"Long screenshot is ready", L"Длинный снимок готов", L"Довгий знімок готовий"},
     /* LongDoneText */ {L"%d × %d px", L"%d × %d px", L"%d × %d px"},
-    /* LongFailed */ {L"The window under the area did not scroll with the mouse wheel.", L"Окно под областью не прокручивается колесом мыши.", L"Вікно під областю не прокручується коліщатком миші."},
+    /* LongFailed */ {L"The window did not scroll. Select the part of the window that scrolls, then turn the mouse wheel down while the long screenshot runs.", L"Окно не прокрутилось. Выделите прокручиваемую часть окна и во время съёмки крутите колесо мыши вниз.", L"Вікно не прокрутилося. Виділіть частину вікна, що прокручується, і під час зйомки крутіть коліщатко миші вниз."},
+    /* LongManual */ {L"Turn the mouse wheel down slowly  •  %d px  •  Enter or Esc — finish", L"Крутите колесо мыши вниз, не спеша  •  %d px  •  Enter или Esc — готово", L"Крутіть коліщатко миші вниз, не поспішаючи  •  %d px  •  Enter або Esc — готово"},
+    /* LongTooFast */ {L"Too fast — scroll back up a little  •  %d px  •  Enter or Esc — finish", L"Слишком быстро — прокрутите немного назад  •  %d px  •  Enter или Esc — готово", L"Занадто швидко — прокрутіть трохи назад  •  %d px  •  Enter або Esc — готово"},
 };
 
 }  // namespace
