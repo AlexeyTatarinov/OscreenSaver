@@ -23,6 +23,9 @@ enum class Str {
     TipFrames,
     MenuSettings, SetTitle, SetGroupCapture, SetHotkey, SetHotkeyCustom, SetHotkeyHint, SetMagnifier,
     SetGroupCompare, SetBackground, SetFrames, SetGroupGeneral, SetOk, SetCancel, TrayTooltipFmt,
+    PinCopy, PinSave, PinActualSize, PinClose, CopiedTitle, CopiedText, OcrDoneTitle, OcrNone, OcrUnavailable,
+    ColorCopied, TipStep, TipPicker, TipCopy, TipPin, TipOcr,
+    SetGroupSave, SetFolder, SetBrowse, SetFormat, SetQuality, SetName, SetNameHint, SetClipboardOnly,
 };
 
 void InitLanguage();

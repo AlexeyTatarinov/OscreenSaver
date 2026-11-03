@@ -7,7 +7,8 @@
 #include <vector>
 
 // Drawing tools. The order matches the buttons on the panel.
-enum class Tool { Area, Select, Pencil, Marker, Brush, Arrow, Rect, Ellipse, Blur, Text, Eraser, Count };
+// Step = numbered marker 1, 2, 3...; Picker = eyedropper (copies the colour under the cursor).
+enum class Tool { Area, Select, Pencil, Marker, Brush, Arrow, Rect, Ellipse, Blur, Step, Text, Eraser, Picker, Count };
 
 // Fixed colours on the panel: green, red, white, black. Any other colour is picked in the colour window.
 constexpr int kColorCount = 4;
@@ -58,7 +59,11 @@ struct Shape {
     std::vector<Pt> points;        // freehand: the path; arrow/rect/ellipse: start and end; text: top-left
     std::vector<TextRun> runs;     // text only
     std::vector<Erasure> erasures; // rubbed-out parts
+    int number = 0;                // numbered marker only
 };
+
+// Radius of a numbered marker.
+float StepRadius(int size, float scale);
 
 void StartGraphics();
 void StopGraphics();

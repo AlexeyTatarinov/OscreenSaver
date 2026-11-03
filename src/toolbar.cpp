@@ -97,6 +97,8 @@ wchar_t GlyphFor(int id) {
         case static_cast<int>(Tool::Text): return 0xE8D2;    // Font
         case static_cast<int>(Tool::Eraser): return 0xE75C;  // EraseTool
         case kUndo: return 0xE7A7;
+        case kCopy: return 0xE8C8;  // Copy
+        case kPin: return 0xE718;   // Pin
         case kRedo: return 0xE7A6;
         case kSave: return 0xE8FB;   // Accept
         case kClose: return 0xE711;  // Cancel
@@ -207,6 +209,51 @@ void IconErasePart(G::Graphics& g, const Box& b, const G::Color& fg, float s) {
     g.DrawEllipse(pen.get(), b.X(5), b.Y(5), b.size * 6 / 16, b.size * 6 / 16);
 }
 
+// Numbered marker: a filled circle with "1".
+void IconStep(G::Graphics& g, const Box& b, const G::Color& fg, float s) {
+    G::SolidBrush fill(fg);
+    g.FillEllipse(&fill, b.X(1.5f), b.Y(1.5f), b.size * 13 / 16, b.size * 13 / 16);
+    G::FontFamily segoe(L"Segoe UI");
+    const G::FontFamily* family = segoe.IsAvailable() ? &segoe : G::FontFamily::GenericSansSerif();
+    G::Font font(family, 10.f * s, family->IsStyleAvailable(G::FontStyleBold) ? G::FontStyleBold : 0, G::UnitPixel);
+    G::StringFormat fmt;
+    fmt.SetAlignment(G::StringAlignmentCenter);
+    fmt.SetLineAlignment(G::StringAlignmentCenter);
+    // The number is cut out in the panel colour: light circle on dark panels, dark on light ones.
+    const BYTE inv = fg.GetR() > 128 ? 40 : 250;
+    G::SolidBrush ink(G::Color(255, inv, inv, inv));
+    g.SetTextRenderingHint(G::TextRenderingHintAntiAliasGridFit);
+    g.DrawString(L"1", -1, &font, G::RectF(b.X(1.5f), b.Y(1.8f), b.size * 13 / 16, b.size * 13 / 16), &fmt, &ink);
+}
+
+// Eyedropper: a pipette leaning to the left.
+void IconPicker(G::Graphics& g, const Box& b, const G::Color& fg, float s) {
+    auto pen = LinePen(fg, s);
+    G::PointF body[] = {{b.X(9.5f), b.Y(4)}, {b.X(12), b.Y(6.5f)}, {b.X(5), b.Y(13.5f)}, {b.X(2.5f), b.Y(13.5f)},
+                        {b.X(2.5f), b.Y(11)}, {b.X(9.5f), b.Y(4)}};
+    g.DrawLines(pen.get(), body, 6);
+    G::SolidBrush fill(fg);
+    G::PointF top[] = {{b.X(9), b.Y(3.5f)}, {b.X(11.5f), b.Y(1)}, {b.X(15), b.Y(4.5f)}, {b.X(12.5f), b.Y(7)}};
+    g.FillPolygon(&fill, top, 4);
+}
+
+// Text recognition: lines of text in corner marks.
+void IconOcr(G::Graphics& g, const Box& b, const G::Color& fg, float s) {
+    auto pen = LinePen(fg, s);
+    const float c = 3.5f;
+    G::PointF tl[] = {{b.X(1), b.Y(1 + c)}, {b.X(1), b.Y(1)}, {b.X(1 + c), b.Y(1)}};
+    G::PointF tr[] = {{b.X(15 - c), b.Y(1)}, {b.X(15), b.Y(1)}, {b.X(15), b.Y(1 + c)}};
+    G::PointF bl[] = {{b.X(1), b.Y(15 - c)}, {b.X(1), b.Y(15)}, {b.X(1 + c), b.Y(15)}};
+    G::PointF br[] = {{b.X(15 - c), b.Y(15)}, {b.X(15), b.Y(15)}, {b.X(15), b.Y(15 - c)}};
+    g.DrawLines(pen.get(), tl, 3);
+    g.DrawLines(pen.get(), tr, 3);
+    g.DrawLines(pen.get(), bl, 3);
+    g.DrawLines(pen.get(), br, 3);
+    g.DrawLine(pen.get(), b.X(4.5f), b.Y(5.5f), b.X(11.5f), b.Y(5.5f));
+    g.DrawLine(pen.get(), b.X(4.5f), b.Y(8), b.X(11.5f), b.Y(8));
+    g.DrawLine(pen.get(), b.X(4.5f), b.Y(10.5f), b.X(9), b.Y(10.5f));
+}
+
 // Fallback drawings for buttons that normally use the Windows icon font.
 void IconFallback(G::Graphics& g, const Box& b, const G::Color& fg, float s, int id) {
     auto pen = LinePen(fg, s);
@@ -257,6 +304,15 @@ void IconFallback(G::Graphics& g, const Box& b, const G::Color& fg, float s, int
             g.DrawLines(pen.get(), pts, 3);
             break;
         }
+        case kCopy:
+            g.DrawRectangle(pen.get(), b.X(4.5f), b.Y(4.5f), b.size * 9 / 16, b.size * 10 / 16);
+            g.DrawLine(pen.get(), b.X(2), b.Y(12), b.X(2), b.Y(2));
+            g.DrawLine(pen.get(), b.X(2), b.Y(2), b.X(10), b.Y(2));
+            break;
+        case kPin:
+            g.DrawLine(pen.get(), b.X(3), b.Y(13), b.X(7), b.Y(9));
+            g.DrawEllipse(pen.get(), b.X(6.5f), b.Y(2.5f), b.size * 7 / 16, b.size * 7 / 16);
+            break;
         case kClose:
             g.DrawLine(pen.get(), b.X(3), b.Y(3), b.X(13), b.Y(13));
             g.DrawLine(pen.get(), b.X(13), b.Y(3), b.X(3), b.Y(13));
@@ -451,6 +507,9 @@ void Draw(HDC dc, const RECT& panel, const State& st, float s) {
             case kErasePart: IconErasePart(g, b, color, s); break;
             case kAddArea: IconAddArea(g, b, color, s); break;
             case kFrames: IconFrames(g, b, color, s); break;
+            case static_cast<int>(Tool::Step): IconStep(g, b, color, s); break;
+            case static_cast<int>(Tool::Picker): IconPicker(g, b, color, s); break;
+            case kOcr: IconOcr(g, b, color, s); break;
             default: IconFallback(g, b, iconColor, s, id); break;
         }
     }
@@ -482,6 +541,11 @@ const wchar_t* Tip(int id) {
         case kRedo: return T(Str::TipRedo);
         case kAddArea: return T(Str::TipAddArea);
         case kFrames: return T(Str::TipFrames);
+        case kOcr: return T(Str::TipOcr);
+        case kPin: return T(Str::TipPin);
+        case kCopy: return T(Str::TipCopy);
+        case static_cast<int>(Tool::Step): return T(Str::TipStep);
+        case static_cast<int>(Tool::Picker): return T(Str::TipPicker);
         case kSave: return T(Str::TipSave);
         case kClose: return T(Str::TipClose);
     }

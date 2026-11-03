@@ -1,5 +1,7 @@
 #include "save.h"
 
+#include "config.h"
+
 #include <objbase.h>
 #include <shlobj.h>
 #include <wincodec.h>
@@ -10,8 +12,6 @@
 
 namespace {
 
-constexpr float kJpgQuality = 0.90f;
-
 template <typename T>
 void Release(T*& p) {
     if (p) {
@@ -20,42 +20,54 @@ void Release(T*& p) {
     }
 }
 
-std::wstring OutputFolder() {
-    std::wstring folder;
-    PWSTR pictures = nullptr;
-    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Pictures, 0, nullptr, &pictures))) {
-        folder = pictures;
-    }
-    CoTaskMemFree(pictures);
-    if (folder.empty()) {
-        return folder;
-    }
-    folder += L"\\OscreenSaver";
-    CreateDirectoryW(folder.c_str(), nullptr);
-    return folder;
-}
-
 std::wstring NewFilePath() {
-    const std::wstring folder = OutputFolder();
+    const std::wstring folder = SaveFolder();
     if (folder.empty()) {
         return folder;
     }
-    SYSTEMTIME t;
-    GetLocalTime(&t);
-    wchar_t name[64];
-    swprintf(name, 64, L"OscreenSaver_%04u-%02u-%02u_%02u-%02u-%02u", t.wYear, t.wMonth, t.wDay, t.wHour,
-             t.wMinute, t.wSecond);
-    std::wstring path = folder + L"\\" + name + L".jpg";
-    // Two screenshots in the same second get a counter instead of overwriting each other.
+    SHCreateDirectoryExW(nullptr, folder.c_str(), nullptr);  // also creates missing parent folders
+    const std::wstring name = ExpandNameTemplate(Cfg().nameTemplate);
+    const std::wstring ext = Cfg().png ? L".png" : L".jpg";
+    std::wstring path = folder + L"\\" + name + ext;
+    // Two screenshots with the same name get a counter instead of overwriting each other.
     for (int n = 2; GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES; ++n) {
-        path = folder + L"\\" + name + L"_" + std::to_wstring(n) + L".jpg";
+        path = folder + L"\\" + name + L"_" + std::to_wstring(n) + ext;
     }
     return path;
 }
 
 }  // namespace
 
-bool SaveAreaAsJpg(const Snapshot& shot, const RECT& area, std::wstring& savedPath) {
+std::wstring ExpandNameTemplate(const std::wstring& tpl) {
+    SYSTEMTIME t;
+    GetLocalTime(&t);
+    std::wstring out;
+    for (size_t i = 0; i < tpl.size(); ++i) {
+        wchar_t c = tpl[i];
+        if (c == L'%' && i + 1 < tpl.size()) {
+            wchar_t part[8] = {};
+            switch (tpl[i + 1]) {
+                case L'Y': swprintf(part, 8, L"%04u", t.wYear); break;
+                case L'm': swprintf(part, 8, L"%02u", t.wMonth); break;
+                case L'd': swprintf(part, 8, L"%02u", t.wDay); break;
+                case L'H': swprintf(part, 8, L"%02u", t.wHour); break;
+                case L'M': swprintf(part, 8, L"%02u", t.wMinute); break;
+                case L'S': swprintf(part, 8, L"%02u", t.wSecond); break;
+            }
+            if (part[0]) {
+                out += part;
+                ++i;
+                continue;
+            }
+        }
+        // Letters Windows does not allow in file names are replaced.
+        if (wcschr(L"\\/:*?\"<>|", c) || c < 32) c = L'_';
+        out += c;
+    }
+    return out.empty() ? L"OscreenSaver" : out;
+}
+
+bool SaveArea(const Snapshot& shot, const RECT& area, std::wstring& savedPath) {
     const int w = area.right - area.left;
     const int h = area.bottom - area.top;
     if (w <= 0 || h <= 0) {
@@ -91,7 +103,9 @@ bool SaveAreaAsJpg(const Snapshot& shot, const RECT& area, std::wstring& savedPa
                                                    reinterpret_cast<BYTE*>(pixels.data()), &source))) break;
         if (FAILED(factory->CreateStream(&stream))) break;
         if (FAILED(stream->InitializeFromFilename(path.c_str(), GENERIC_WRITE))) break;
-        if (FAILED(factory->CreateEncoder(GUID_ContainerFormatJpeg, nullptr, &encoder))) break;
+        const bool png = Cfg().png;
+        if (FAILED(factory->CreateEncoder(png ? GUID_ContainerFormatPng : GUID_ContainerFormatJpeg, nullptr,
+                                          &encoder))) break;
         if (FAILED(encoder->Initialize(stream, WICBitmapEncoderNoCache))) break;
         if (FAILED(encoder->CreateNewFrame(&frame, &options))) break;
 
@@ -100,8 +114,8 @@ bool SaveAreaAsJpg(const Snapshot& shot, const RECT& area, std::wstring& savedPa
         VARIANT value;
         VariantInit(&value);
         value.vt = VT_R4;
-        value.fltVal = kJpgQuality;
-        options->Write(1, &quality, &value);
+        value.fltVal = static_cast<float>(Cfg().jpgQuality) / 100.f;
+        if (!png) options->Write(1, &quality, &value);
 
         if (FAILED(frame->Initialize(options))) break;
         if (FAILED(frame->SetSize(static_cast<UINT>(w), static_cast<UINT>(h)))) break;

@@ -1,6 +1,7 @@
 #include "config.h"
 
 #include <commctrl.h>
+#include <shlobj.h>
 
 namespace {
 
@@ -20,6 +21,18 @@ void WriteDword(HKEY key, const wchar_t* name, DWORD value) {
     RegSetValueExW(key, name, 0, REG_DWORD, reinterpret_cast<const BYTE*>(&value), sizeof(value));
 }
 
+std::wstring ReadString(HKEY key, const wchar_t* name, const std::wstring& fallback) {
+    wchar_t buf[1024];
+    DWORD size = sizeof(buf);
+    if (RegGetValueW(key, nullptr, name, RRF_RT_REG_SZ, nullptr, buf, &size) == ERROR_SUCCESS) return buf;
+    return fallback;
+}
+
+void WriteString(HKEY key, const wchar_t* name, const std::wstring& value) {
+    RegSetValueExW(key, name, 0, REG_SZ, reinterpret_cast<const BYTE*>(value.c_str()),
+                   static_cast<DWORD>((value.size() + 1) * sizeof(wchar_t)));
+}
+
 }  // namespace
 
 Config& Cfg() { return g_config; }
@@ -33,7 +46,14 @@ void LoadConfig() {
     g_config.background = ReadDword(key, L"Background", defaults.background);
     g_config.frames = ReadDword(key, L"Frames", defaults.frames) != 0;
     g_config.magnifier = ReadDword(key, L"Magnifier", defaults.magnifier) != 0;
+    g_config.folder = ReadString(key, L"Folder", defaults.folder);
+    g_config.png = ReadDword(key, L"Png", defaults.png) != 0;
+    g_config.jpgQuality = static_cast<int>(ReadDword(key, L"JpgQuality", defaults.jpgQuality));
+    g_config.nameTemplate = ReadString(key, L"NameTemplate", defaults.nameTemplate);
+    g_config.clipboardOnly = ReadDword(key, L"ClipboardOnly", defaults.clipboardOnly) != 0;
     if (g_config.hotkeyVk == 0 || g_config.hotkeyVk > 0xFE) g_config.hotkeyVk = defaults.hotkeyVk;
+    if (g_config.jpgQuality < 1 || g_config.jpgQuality > 100) g_config.jpgQuality = defaults.jpgQuality;
+    if (g_config.nameTemplate.empty()) g_config.nameTemplate = defaults.nameTemplate;
     RegCloseKey(key);
 }
 
@@ -48,6 +68,11 @@ void SaveConfig() {
     WriteDword(key, L"Background", g_config.background);
     WriteDword(key, L"Frames", g_config.frames ? 1 : 0);
     WriteDword(key, L"Magnifier", g_config.magnifier ? 1 : 0);
+    WriteString(key, L"Folder", g_config.folder);
+    WriteDword(key, L"Png", g_config.png ? 1 : 0);
+    WriteDword(key, L"JpgQuality", static_cast<DWORD>(g_config.jpgQuality));
+    WriteString(key, L"NameTemplate", g_config.nameTemplate);
+    WriteDword(key, L"ClipboardOnly", g_config.clipboardOnly ? 1 : 0);
     RegCloseKey(key);
 }
 
@@ -73,4 +98,13 @@ std::wstring HotkeyName(UINT vk, UINT mods) {
     const UINT scan = MapVirtualKeyW(vk, MAPVK_VK_TO_VSC);
     if (scan && GetKeyNameTextW(static_cast<LONG>(scan << 16), text, 64) > 0) return name + text;
     return name + L"#" + std::to_wstring(vk);
+}
+
+std::wstring SaveFolder() {
+    if (!g_config.folder.empty()) return g_config.folder;
+    std::wstring folder;
+    PWSTR pictures = nullptr;
+    if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Pictures, 0, nullptr, &pictures))) folder = pictures;
+    CoTaskMemFree(pictures);
+    return folder.empty() ? folder : folder + L"\\OscreenSaver";
 }

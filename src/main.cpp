@@ -18,6 +18,7 @@
 #include "autostart.h"
 #include "config.h"
 #include "i18n.h"
+#include "ocr.h"
 #include "overlay.h"
 #include "settings.h"
 
@@ -30,9 +31,10 @@ constexpr UINT WM_APP_CAPTURE = WM_APP + 1;
 constexpr UINT WM_APP_TRAY = WM_APP + 2;
 constexpr UINT WM_APP_OVERLAY_KEY = WM_APP + 3;
 constexpr UINT WM_APP_SETTINGS_CHANGED = WM_APP + 4;
+constexpr UINT WM_APP_OCR_DONE = WM_APP + 5;
 constexpr UINT kTrayId = 1;
 
-enum MenuId : UINT { IdCapture = 100, IdAutostart, IdSettings, IdExit };
+enum MenuId : UINT { IdCapture = 100, IdSettings, IdExit };
 
 HINSTANCE g_instance = nullptr;
 HWND g_main = nullptr;
@@ -119,14 +121,25 @@ void OpenSavedFolder() {
     ShellExecuteW(nullptr, L"open", L"explorer.exe", args.c_str(), nullptr, SW_SHOWNORMAL);
 }
 
+void CopyTextToClipboard(const std::wstring& text) {
+    if (!OpenClipboard(g_main)) return;
+    EmptyClipboard();
+    const size_t bytes = (text.size() + 1) * sizeof(wchar_t);
+    HGLOBAL memory = GlobalAlloc(GMEM_MOVEABLE, bytes);
+    if (memory) {
+        memcpy(GlobalLock(memory), text.c_str(), bytes);
+        GlobalUnlock(memory);
+        if (!SetClipboardData(CF_UNICODETEXT, memory)) GlobalFree(memory);
+    }
+    CloseClipboard();
+}
+
 void ShowTrayMenu() {
     HMENU menu = CreatePopupMenu();
     const std::wstring capture = std::wstring(T(Str::MenuCapture)) + L"\t" +
                                  HotkeyName(Cfg().hotkeyVk, Cfg().hotkeyMods);
     AppendMenuW(menu, MF_STRING, IdCapture, capture.c_str());
     AppendMenuW(menu, MF_STRING, IdSettings, T(Str::MenuSettings));
-    AppendMenuW(menu, MF_STRING | (IsAutostartEnabled() ? MF_CHECKED : MF_UNCHECKED), IdAutostart,
-                T(Str::MenuAutostart));
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, IdExit, T(Str::MenuExit));
 
@@ -139,7 +152,6 @@ void ShowTrayMenu() {
 
     switch (cmd) {
         case IdCapture: PostMessageW(g_main, WM_APP_CAPTURE, 0, 0); break;
-        case IdAutostart: SetAutostart(!IsAutostartEnabled()); break;
         case IdSettings: ShowSettings(g_instance, g_main, WM_APP_SETTINGS_CHANGED); break;
         case IdExit: DestroyWindow(g_main); break;
     }
@@ -150,6 +162,21 @@ LRESULT CALLBACK MainProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case WM_APP_CAPTURE:
             OpenOverlay(g_instance);
             return 0;
+        case WM_APP_OCR_DONE: {
+            std::wstring* text = reinterpret_cast<std::wstring*>(lp);
+            if (!wp) {
+                ShowNotice(T(Str::AppName), T(Str::OcrUnavailable), NIIF_WARNING);
+            } else if (!text || text->empty()) {
+                ShowNotice(T(Str::AppName), T(Str::OcrNone), NIIF_INFO);
+            } else {
+                CopyTextToClipboard(*text);
+                g_lastSaved.clear();
+                const std::wstring preview = text->size() > 120 ? text->substr(0, 120) + L"…" : *text;
+                ShowNotice(T(Str::OcrDoneTitle), preview.c_str(), NIIF_INFO);
+            }
+            delete text;
+            return 0;
+        }
         case WM_APP_SETTINGS_CHANGED:
             AddTrayIcon();  // the hint shows the new shortcut
             return 0;
@@ -182,6 +209,15 @@ LRESULT CALLBACK MainProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 void NotifySaved(const std::wstring& path) {
     g_lastSaved = path;
     ShowNotice(T(Str::SavedTitle), T(Str::SavedText), NIIF_INFO);
+}
+
+void NotifyCopied() {
+    g_lastSaved.clear();  // nothing to open on a click
+    ShowNotice(T(Str::CopiedTitle), T(Str::CopiedText), NIIF_INFO);
+}
+
+void StartTextRecognition(Snapshot picture) {
+    RecognizeText(picture, g_main, WM_APP_OCR_DONE);
 }
 
 void NotifySaveFailed() {

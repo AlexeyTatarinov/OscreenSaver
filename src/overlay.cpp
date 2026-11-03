@@ -1,6 +1,7 @@
 #include "overlay.h"
 
 #include <commdlg.h>
+#include <dwmapi.h>
 #include <shellscalingapi.h>
 
 #include <algorithm>
@@ -16,6 +17,7 @@
 #include "capture.h"
 #include "config.h"
 #include "i18n.h"
+#include "pin.h"
 #include "save.h"
 #include "toolbar.h"
 
@@ -101,6 +103,9 @@ struct Overlay {
 
     POINT mouse = {-10000, -10000};
     int hover = toolbar::kNone;
+    RECT hoverWindow = {};  // window under the cursor, shown with a frame in area mode
+    std::wstring flash;     // short message near the cursor (eyedropper)
+    RECT flashBox = {};
     bool dark = true;
     COLORREF accent = RGB(0, 120, 215);  // Windows accent colour: frames, handles, numbers
 
@@ -128,6 +133,9 @@ struct Piece {
     int order;  // number shown in the corner and position in the joined picture
 };
 std::vector<Piece> g_pieces;
+
+// Windows on the screen at the moment of the snapshot (top first), for "click a window to select it".
+std::vector<RECT> g_windows;
 constexpr int kMaxAreas = 4;
 
 }  // namespace
@@ -154,6 +162,46 @@ RECT Union(const RECT& a, const RECT& b) {
     RECT r;
     UnionRect(&r, &a, &b);
     return r;
+}
+
+// ---------- Windows under the cursor ----------
+
+BOOL CALLBACK CollectWindow(HWND w, LPARAM) {
+    if (!IsWindowVisible(w) || IsIconic(w)) return TRUE;
+    DWORD pid = 0;
+    GetWindowThreadProcessId(w, &pid);
+    if (pid == GetCurrentProcessId()) return TRUE;
+    BOOL cloaked = FALSE;  // windows hidden on other virtual desktops and similar
+    if (SUCCEEDED(DwmGetWindowAttribute(w, DWMWA_CLOAKED, &cloaked, sizeof(cloaked))) && cloaked) return TRUE;
+    const LONG_PTR ex = GetWindowLongPtrW(w, GWL_EXSTYLE);
+    if ((ex & WS_EX_TOOLWINDOW) && !(ex & WS_EX_APPWINDOW)) return TRUE;  // tooltips, small helper windows
+    RECT r;
+    // The visible frame, without the invisible resize border of Windows 10/11.
+    if (FAILED(DwmGetWindowAttribute(w, DWMWA_EXTENDED_FRAME_BOUNDS, &r, sizeof(r)))) GetWindowRect(w, &r);
+    if (r.right - r.left < 40 || r.bottom - r.top < 30) return TRUE;
+    g_windows.push_back(r);
+    return TRUE;
+}
+
+void CollectWindows() {
+    g_windows.clear();
+    EnumWindows(CollectWindow, 0);  // goes from the top window down
+}
+
+// Rectangle of the top window under the point (in this monitor's pixels), or an empty one.
+RECT WindowAt(const Overlay& o, POINT p) {
+    const POINT screen = {p.x + o.shot.bounds.left, p.y + o.shot.bounds.top};
+    for (const RECT& r : g_windows) {
+        if (PtInRect(&r, screen)) {
+            RECT local = {r.left - o.shot.bounds.left, r.top - o.shot.bounds.top, r.right - o.shot.bounds.left,
+                          r.bottom - o.shot.bounds.top};
+            const RECT all = {0, 0, o.shot.Width(), o.shot.Height()};
+            RECT clipped;
+            IntersectRect(&clipped, &local, &all);
+            return clipped;
+        }
+    }
+    return RECT{0, 0, 0, 0};
 }
 
 // ---------- Areas for the side-by-side picture ----------
@@ -373,7 +421,8 @@ constexpr int kMagPixels = 15;  // pixels across (odd: the middle one is under t
 int MagCell(const Overlay& o) { return std::max(6, static_cast<int>(8 * o.scale + 0.5f)); }
 
 bool MagnifierVisible(const Overlay& o) {
-    if (!Cfg().magnifier || o.picking || o.tool != Tool::Area) return false;
+    if (o.picking) return false;
+    if (o.tool != Tool::Picker && (!Cfg().magnifier || o.tool != Tool::Area)) return false;
     const RECT all = ClientRect(o);
     return PtInRect(&all, o.mouse) && PanelHit(o, o.mouse) == toolbar::kNone;
 }
@@ -420,12 +469,20 @@ RECT PickFrameArea(const Overlay& o) {
     return r;
 }
 
+RECT HoverWindowArea(const Overlay& o) {
+    if (IsRectEmpty(&o.hoverWindow)) return o.hoverWindow;
+    RECT r = o.hoverWindow;
+    InflateRect(&r, Scaled(o, 3), Scaled(o, 3));
+    return r;
+}
+
 // Everything outside the picture itself: frames, handles, size label, panel, hints, eraser circle.
 RECT ChromeRect(const Overlay& o) {
     if (o.picking) return RECT{0, 0, 0, 0};
     RECT r;
     if (!o.hasSelection) {
         r = Union(TextBox(o, HintText().c_str(), HintAnchor(o), true), MagnifierRect(o));
+        r = Union(r, HoverWindowArea(o));
     } else {
         r = o.selection;
         InflateRect(&r, Scaled(o, 6), Scaled(o, 6));
@@ -438,6 +495,8 @@ RECT ChromeRect(const Overlay& o) {
     r = Union(r, EraserCircleRect(o));
     r = Union(r, PickFrameArea(o));
     r = Union(r, MagnifierRect(o));
+    r = Union(r, HoverWindowArea(o));
+    r = Union(r, o.flashBox);
     return r;
 }
 
@@ -1195,6 +1254,18 @@ void Paint(Overlay& o) {
             }
         }
     }
+    if (!IsRectEmpty(&o.hoverWindow) && !o.picking) {
+        // The window that a click would select.
+        HPEN pen = CreatePen(PS_SOLID, Scaled(o, 2), o.accent);
+        HGDIOBJ oldPen = SelectObject(o.backDc, pen);
+        HGDIOBJ oldBrush = SelectObject(o.backDc, GetStockObject(NULL_BRUSH));
+        const RECT& r = o.hoverWindow;
+        Rectangle(o.backDc, r.left + 1, r.top + 1, r.right, r.bottom);
+        SelectObject(o.backDc, oldBrush);
+        SelectObject(o.backDc, oldPen);
+        DeleteObject(pen);
+    }
+    if (!o.flash.empty()) DrawTextBox(o, o.backDc, o.flash.c_str(), o.flashBox);
     if (MagnifierVisible(o)) DrawMagnifier(o, o.backDc);
     RestoreDC(o.backDc, saved);
 
@@ -1302,7 +1373,11 @@ void AddFrame(Snapshot& part, int width) {
 }
 
 // Saves and copies the result of the whole session: one area, or up to four joined together.
-void FinishSession() {
+// What happens with the finished picture.
+enum class Finishing { SaveAndCopy, CopyOnly, Pin, Text };
+
+void FinishSession(Finishing how = Finishing::SaveAndCopy) {
+    if (how == Finishing::SaveAndCopy && Cfg().clipboardOnly) how = Finishing::CopyOnly;
     for (Overlay* o : g_overlays) CommitText(*o);
     std::vector<Piece> areas = g_pieces;
     for (Overlay* o : g_overlays) {
@@ -1333,16 +1408,37 @@ void FinishSession() {
         NotifySaveFailed();
         return;
     }
+    // Where the first area was on the screen: a pinned picture appears right there.
+    const Piece& first = areas.front();
+    const POINT screenAt = {first.owner->shot.bounds.left + first.area.left,
+                            first.owner->shot.bounds.top + first.area.top};
     const RECT all = {0, 0, result.Width(), result.Height()};
-    std::wstring path;
-    const bool saved = SaveAreaAsJpg(result, all, path);
-    CopyAreaToClipboard(result, all, g_overlays.empty() ? nullptr : g_overlays.front()->hwnd);
-    FreeSnapshot(result);
-    CloseAll();
-    if (saved) {
-        NotifySaved(path);
-    } else {
-        NotifySaveFailed();
+    HWND owner = g_overlays.empty() ? nullptr : g_overlays.front()->hwnd;
+    switch (how) {
+        case Finishing::Pin:
+            CloseAll();
+            PinPicture(result, screenAt);  // the pinned window keeps the picture
+            return;
+        case Finishing::Text:
+            CloseAll();
+            StartTextRecognition(result);  // the text goes to the clipboard when it is read
+            return;
+        case Finishing::CopyOnly:
+            CopyAreaToClipboard(result, all, owner);
+            FreeSnapshot(result);
+            CloseAll();
+            NotifyCopied();
+            return;
+        case Finishing::SaveAndCopy: {
+            std::wstring path;
+            const bool saved = SaveArea(result, all, path);
+            CopyAreaToClipboard(result, all, owner);
+            FreeSnapshot(result);
+            CloseAll();
+            if (saved) NotifySaved(path);
+            else NotifySaveFailed();
+            return;
+        }
     }
 }
 
@@ -1416,11 +1512,26 @@ void OnPanelClick(Overlay& o, int id) {
         Cfg().frames = !Cfg().frames;
         SaveConfig();
     }
+    else if (id == kOcr) FinishSession(Finishing::Text);
+    else if (id == kPin) FinishSession(Finishing::Pin);
+    else if (id == kCopy) FinishSession(Finishing::CopyOnly);
     else if (id == kSave) Finish(o);
     else if (id == kClose) CloseAll();
 }
 
 // ---------- Mouse in area mode ----------
+
+// Side-by-side mode: before a new area, the active one is kept with its number. False if there is no
+// room for one more area.
+bool MakeRoomForNewArea(Overlay& o) {
+    const bool someActive =
+        std::any_of(g_overlays.begin(), g_overlays.end(), [](const Overlay* x) { return x->hasSelection; });
+    if (someActive && AreaCount() >= kMaxAreas) return false;
+    for (Overlay* x : g_overlays) KeepSelection(*x);
+    if (AreaCount() >= kMaxAreas) return false;
+    o.creatingNew = true;
+    return true;
+}
 
 void AreaMouseDown(Overlay& o, POINT p) {
     SetCapture(o.hwnd);
@@ -1475,22 +1586,10 @@ void AreaMouseMove(Overlay& o, POINT p) {
     const RECT s0 = o.selectionAtStart;
     switch (o.drag) {
         case Drag::Create:
-            if (CompareMode() && !o.creatingNew) {
-                // A new area in side-by-side mode: the active one is kept with its number, if there is room.
-                const bool someActive = std::any_of(g_overlays.begin(), g_overlays.end(),
-                                                    [](const Overlay* x) { return x->hasSelection; });
-                if (someActive && AreaCount() >= kMaxAreas) {
-                    o.drag = Drag::None;
-                    ReleaseCapture();
-                    return;
-                }
-                for (Overlay* x : g_overlays) KeepSelection(*x);
-                if (AreaCount() >= kMaxAreas) {
-                    o.drag = Drag::None;
-                    ReleaseCapture();
-                    return;
-                }
-                o.creatingNew = true;
+            if (CompareMode() && !o.creatingNew && !MakeRoomForNewArea(o)) {
+                o.drag = Drag::None;
+                ReleaseCapture();
+                return;
             }
             SetSelection(o, Normalize(o.dragStart.x, o.dragStart.y, p.x, p.y));
             break;
@@ -1515,8 +1614,16 @@ void AreaMouseUp(Overlay& o) {
     const bool click = drag == Drag::Create && !o.moved;
     o.drag = Drag::None;
     if (GetCapture() == o.hwnd) ReleaseCapture();
-    if (click && !CompareMode()) {
-        SetSelection(o, ClientRect(o));  // a single click selects the whole screen
+    if (click) {
+        // A click selects the window under the cursor; where there is no window, the whole screen.
+        const RECT window = WindowAt(o, o.dragStart);
+        if (!CompareMode()) {
+            SetSelection(o, IsRectEmpty(&window) ? ClientRect(o) : window);
+        } else if (!IsRectEmpty(&window) && (o.creatingNew || MakeRoomForNewArea(o))) {
+            SetSelection(o, window);
+        }
+        ChromeChange change(o);
+        o.hoverWindow = RECT{};
     }
     if (drag == Drag::Create && o.hasSelection && !o.firstSelectionDone && !CompareMode()) {
         // Order of work: first choose the area, then draw. The pencil is ready right away.
@@ -1650,6 +1757,8 @@ void OnKeyDown(Overlay& o, WPARAM key) {
         Redo(o);
     } else if (ctrl && key == 'S') {
         Finish(o);
+    } else if (ctrl && key == 'C') {
+        FinishSession(Finishing::CopyOnly);
     } else if (ctrl && key == 'A') {
         SetSelection(o, ClientRect(o));
     }
@@ -1661,6 +1770,61 @@ void OnChar(Overlay& o, wchar_t ch) {
     TypeChar(o, ch);
 }
 
+void CopyText(HWND owner, const std::wstring& text) {
+    if (!OpenClipboard(owner)) return;
+    EmptyClipboard();
+    const size_t bytes = (text.size() + 1) * sizeof(wchar_t);
+    HGLOBAL memory = GlobalAlloc(GMEM_MOVEABLE, bytes);
+    if (memory) {
+        std::memcpy(GlobalLock(memory), text.c_str(), bytes);
+        GlobalUnlock(memory);
+        if (!SetClipboardData(CF_UNICODETEXT, memory)) GlobalFree(memory);
+    }
+    CloseClipboard();
+}
+
+constexpr UINT_PTR kFlashTimer = 77;
+
+// Eyedropper: the colour under the cursor goes to the clipboard as #RRGGBB and becomes the drawing colour.
+void PickColor(Overlay& o, POINT p) {
+    if (p.x < 0 || p.y < 0 || p.x >= o.shot.Width() || p.y >= o.shot.Height()) return;
+    const uint32_t px = o.shot.pixels[static_cast<size_t>(p.y) * o.shot.Width() + p.x];
+    const COLORREF c = RGB((px >> 16) & 0xFF, (px >> 8) & 0xFF, px & 0xFF);
+    wchar_t hex[8];
+    swprintf(hex, 8, L"#%02X%02X%02X", GetRValue(c), GetGValue(c), GetBValue(c));
+    CopyText(o.hwnd, hex);
+    {
+        ChromeChange change(o);
+        g_settings.customColor = c;
+        g_settings.hasCustom = true;
+        wchar_t text[64];
+        swprintf(text, 64, T(Str::ColorCopied), hex);
+        o.flash = text;
+        const int gap = static_cast<int>(18 * o.scale);
+        o.flashBox = TextBox(o, text, RECT{p.x + gap, p.y - gap, p.x + gap, p.y - gap}, false);
+    }
+    SetColorValue(o, kColorCount, c);
+    SetTimer(o.hwnd, kFlashTimer, 1500, nullptr);
+}
+
+// Numbered marker: the next number after the largest one already placed.
+void PlaceStep(Overlay& o, POINT p) {
+    int number = 0;
+    for (const Shape& s : o.shapes) {
+        if (s.tool == Tool::Step) number = std::max(number, s.number);
+    }
+    Shape s;
+    s.tool = Tool::Step;
+    s.color = o.color;
+    s.size = o.size;
+    s.points = {ToPt(p)};
+    s.number = number + 1;
+    ChromeChange change(o);  // undo button
+    Checkpoint(o);
+    o.shapes.push_back(s);
+    InvalidateShape(o, s);
+}
+
 void OnMouseDown(Overlay& o, POINT p, bool ctrl) {
     if (o.picking) return;
     const int id = PanelHit(o, p);
@@ -1670,6 +1834,10 @@ void OnMouseDown(Overlay& o, POINT p, bool ctrl) {
     }
     SetFocus(o.hwnd);
     if (ctrl && StartAreaWithCtrl(o, p)) return;
+    if (o.tool == Tool::Picker) {
+        PickColor(o, p);  // works anywhere on the screen
+        return;
+    }
     if (o.tool != Tool::Area && o.tool != Tool::Select && !InAnyArea(o, p)) {
         CommitText(o);  // drawing outside the selection would not be seen or saved
         return;
@@ -1689,6 +1857,10 @@ void OnMouseDown(Overlay& o, POINT p, bool ctrl) {
             CommitText(o);
             StartErase(o, p);
             break;
+        case Tool::Step:
+            CommitText(o);
+            PlaceStep(o, p);
+            break;
         default:
             CommitText(o);
             StartStroke(o, p);
@@ -1702,6 +1874,13 @@ void OnMouseMove(Overlay& o, POINT p) {
         o.mouse = p;
         const bool busy = o.drawing || o.erasing || o.drag != Drag::None || o.pickDrag != Drag::None;
         o.hover = busy ? toolbar::kNone : PanelHit(o, p);
+        // In area mode the window under the cursor is framed: a click selects it.
+        RECT window = {};
+        if (o.tool == Tool::Area && !busy && !o.picking && o.hover == toolbar::kNone && HitTest(o, p) == Outside &&
+            KeptAreaAt(o, p) < 0) {
+            window = WindowAt(o, p);
+        }
+        o.hoverWindow = window;
     }
     if (o.drawing) {
         ContinueStroke(o, p);
@@ -1789,6 +1968,14 @@ LRESULT CALLBACK OverlayProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 return TRUE;
             }
             break;
+        case WM_TIMER:
+            if (wp == kFlashTimer) {
+                KillTimer(hwnd, kFlashTimer);
+                ChromeChange change(*o);
+                o->flash.clear();
+                o->flashBox = RECT{};
+            }
+            return 0;
         case WM_DESTROY:
             RememberSettings(*o);
             return 0;
@@ -1909,6 +2096,7 @@ void OpenOverlay(HINSTANCE instance) {
         return;
     }
     g_pieces.clear();
+    CollectWindows();  // before our own windows appear
     HMONITOR monitor = MonitorUnderCursor();
     if (monitor) {
         if (CreateOverlayWindow(instance, monitor, false)) {

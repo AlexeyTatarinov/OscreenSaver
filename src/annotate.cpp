@@ -274,10 +274,35 @@ void DrawBlur(G::Graphics& g, const Shape& s, const BlurSource& blur) {
     g.SetPixelOffsetMode(mode);
 }
 
+// Numbered marker: a filled circle with the number in a contrasting colour.
+void DrawStep(G::Graphics& g, const Shape& s, float scale) {
+    if (s.points.empty()) return;
+    const float r = StepRadius(s.size, scale);
+    const Pt c = s.points[0];
+    G::SolidBrush fill(ToColor(s.color));
+    g.FillEllipse(&fill, c.x - r, c.y - r, 2 * r, 2 * r);
+    const int brightness = (GetRValue(s.color) * 299 + GetGValue(s.color) * 587 + GetBValue(s.color) * 114) / 1000;
+    G::Pen edge(brightness > 160 ? G::Color(160, 0, 0, 0) : G::Color(200, 255, 255, 255), std::max(1.f, scale));
+    g.DrawEllipse(&edge, c.x - r, c.y - r, 2 * r, 2 * r);
+    G::FontFamily segoe(L"Segoe UI");
+    const G::FontFamily* family = segoe.IsAvailable() ? &segoe : G::FontFamily::GenericSansSerif();
+    const INT style = family->IsStyleAvailable(G::FontStyleBold) ? G::FontStyleBold : G::FontStyleRegular;
+    const std::wstring text = std::to_wstring(s.number);
+    G::Font font(family, r * (text.size() > 1 ? 1.0f : 1.2f), style, G::UnitPixel);
+    G::StringFormat fmt;
+    fmt.SetAlignment(G::StringAlignmentCenter);
+    fmt.SetLineAlignment(G::StringAlignmentCenter);
+    G::SolidBrush ink(brightness > 160 ? G::Color(255, 0, 0, 0) : G::Color(255, 255, 255, 255));
+    g.DrawString(text.c_str(), -1, &font, G::RectF(c.x - r, c.y - r + r * 0.06f, 2 * r, 2 * r), &fmt, &ink);
+}
+
 void DrawOne(G::Graphics& g, const Shape& s, const TextStyle* caretStyle, COLORREF caretColor, int caretIndex,
              const BlurSource& blur, float scale) {
     const float width = StrokeWidth(s.tool, s.size, scale);
     switch (s.tool) {
+        case Tool::Step:
+            DrawStep(g, s, scale);
+            break;
         case Tool::Blur:
             DrawBlur(g, s, blur);
             break;
@@ -543,8 +568,17 @@ bool IsTwoPointTool(Tool t) {
     return t == Tool::Arrow || t == Tool::Rect || t == Tool::Ellipse || t == Tool::Blur;
 }
 
-RECT ShapeBox(const Shape& s, float) {
+float StepRadius(int size, float scale) {
+    static const float kRadius[kSizeCount] = {10.f, 14.f, 19.f};
+    return kRadius[std::clamp(size, 0, kSizeCount - 1)] * scale;
+}
+
+RECT ShapeBox(const Shape& s, float scale) {
     if (s.points.empty()) return RECT{0, 0, 0, 0};
+    if (s.tool == Tool::Step) {
+        const float r = StepRadius(s.size, scale);
+        return ToRect(s.points[0].x - r, s.points[0].y - r, s.points[0].x + r, s.points[0].y + r);
+    }
     if (s.tool == Tool::Text) {
         const G::RectF b = TextBox(s);
         return ToRect(b.X, b.Y, b.GetRight(), b.GetBottom());
@@ -577,6 +611,9 @@ RECT ShapeBounds(const Shape& s, float scale) {
 
 bool ShapeTouched(const Shape& s, Pt p, float r, float scale) {
     if (s.points.empty()) return false;
+    if (s.tool == Tool::Step) {
+        return std::hypot(p.x - s.points[0].x, p.y - s.points[0].y) <= r + StepRadius(s.size, scale);
+    }
     if (s.tool == Tool::Text || s.tool == Tool::Blur) {
         RECT box = ShapeBox(s, scale);
         InflateRect(&box, static_cast<int>(r), static_cast<int>(r));
@@ -587,6 +624,9 @@ bool ShapeTouched(const Shape& s, Pt p, float r, float scale) {
 
 bool ShapeHit(const Shape& s, Pt p, float scale) {
     if (s.points.empty()) return false;
+    if (s.tool == Tool::Step) {
+        return std::hypot(p.x - s.points[0].x, p.y - s.points[0].y) <= StepRadius(s.size, scale) + 3 * scale;
+    }
     if (s.tool == Tool::Text || s.tool == Tool::Rect || s.tool == Tool::Ellipse || s.tool == Tool::Blur) {
         RECT box = ShapeBox(s, scale);
         const int grow = static_cast<int>(StrokeWidth(s.tool, s.size, scale) / 2 + 5 * scale);

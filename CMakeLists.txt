@@ -27,9 +27,17 @@ add_executable(OscreenSaver WIN32
     src/toolbar.cpp
     src/config.cpp
     src/settings.cpp
+    src/pin.cpp
+    src/ocr.cpp
     src/autostart.cpp
     src/i18n.cpp
     res/app.rc
 )
 
-target_link_libraries(OscreenSaver PRIVATE user32 gdi32 shell32 advapi32 shcore ole32 oleaut32 windowscodecs uuid gdiplus comdlg32 comctl32)
+if(MSVC)
+    # Text recognition uses Windows.Media.Ocr through C++/WinRT (part of the Windows SDK).
+    target_link_libraries(OscreenSaver PRIVATE windowsapp)
+    target_compile_options(OscreenSaver PRIVATE /bigobj)
+endif()
+
+target_link_libraries(OscreenSaver PRIVATE user32 gdi32 shell32 advapi32 shcore ole32 oleaut32 windowscodecs uuid gdiplus comdlg32 comctl32 dwmapi)
