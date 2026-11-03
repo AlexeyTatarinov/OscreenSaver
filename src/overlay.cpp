@@ -1148,7 +1148,7 @@ bool ComposeArea(Overlay& o, const RECT& s, Snapshot& result) {
 }
 
 // Joins 2-4 pictures without overlapping: two side by side; a third centred below them;
-// a fourth next to the third (2 x 2). Each row is centred; free space is white.
+// a fourth next to the third (2 x 2). Each row is centred; free space is black.
 bool JoinPictures(std::vector<Snapshot>& parts, Snapshot& out) {
     std::vector<std::vector<size_t>> rows;
     if (parts.size() <= 2) {
@@ -1170,7 +1170,7 @@ bool JoinPictures(std::vector<Snapshot>& parts, Snapshot& out) {
         height += rowH[r];
     }
     if (!CreateBlankSnapshot(width, height, out)) return false;
-    std::fill(out.pixels, out.pixels + static_cast<size_t>(width) * height, 0x00FFFFFFu);
+    std::fill(out.pixels, out.pixels + static_cast<size_t>(width) * height, 0x00000000u);
     int top = 0;
     for (size_t r = 0; r < rows.size(); ++r) {
         int x = (width - rowW[r]) / 2;
