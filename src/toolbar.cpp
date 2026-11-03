@@ -254,6 +254,17 @@ void IconOcr(G::Graphics& g, const Box& b, const G::Color& fg, float s) {
     g.DrawLine(pen.get(), b.X(4.5f), b.Y(10.5f), b.X(9), b.Y(10.5f));
 }
 
+// Long screenshot: a tall page with an arrow down.
+void IconLong(G::Graphics& g, const Box& b, const G::Color& fg, float s) {
+    auto pen = LinePen(fg, s);
+    g.DrawRectangle(pen.get(), b.X(2.5f), b.Y(0.5f), b.size * 7 / 16, b.size * 15 / 16);
+    g.DrawLine(pen.get(), b.X(4.5f), b.Y(3.5f), b.X(7.5f), b.Y(3.5f));
+    g.DrawLine(pen.get(), b.X(4.5f), b.Y(6), b.X(7.5f), b.Y(6));
+    g.DrawLine(pen.get(), b.X(13), b.Y(2), b.X(13), b.Y(13.5f));
+    g.DrawLine(pen.get(), b.X(10.5f), b.Y(11), b.X(13), b.Y(13.5f));
+    g.DrawLine(pen.get(), b.X(15.5f), b.Y(11), b.X(13), b.Y(13.5f));
+}
+
 // Fallback drawings for buttons that normally use the Windows icon font.
 void IconFallback(G::Graphics& g, const Box& b, const G::Color& fg, float s, int id) {
     auto pen = LinePen(fg, s);
@@ -436,7 +447,7 @@ void Draw(HDC dc, const RECT& panel, const State& st, float s) {
                             (id == kStrike && st.strike) || (id == kEraseWhole && !st.eraseParts) ||
                             (id == kErasePart && st.eraseParts) || (id == kFrames && st.frames);
         const bool disabled = (id == kUndo && !st.canUndo) || (id == kRedo && !st.canRedo) ||
-                              (id == kAddArea && !st.canAddArea);
+                              (id == kAddArea && !st.canAddArea) || (id == kLong && !st.canLong);
         G::RectF cell = r;
         cell.Inflate(-2 * s, -2 * s);
         if (active) {
@@ -510,6 +521,7 @@ void Draw(HDC dc, const RECT& panel, const State& st, float s) {
             case static_cast<int>(Tool::Step): IconStep(g, b, color, s); break;
             case static_cast<int>(Tool::Picker): IconPicker(g, b, color, s); break;
             case kOcr: IconOcr(g, b, color, s); break;
+            case kLong: IconLong(g, b, color, s); break;
             default: IconFallback(g, b, iconColor, s, id); break;
         }
     }
@@ -542,6 +554,7 @@ const wchar_t* Tip(int id) {
         case kAddArea: return T(Str::TipAddArea);
         case kFrames: return T(Str::TipFrames);
         case kOcr: return T(Str::TipOcr);
+        case kLong: return T(Str::TipLong);
         case kPin: return T(Str::TipPin);
         case kCopy: return T(Str::TipCopy);
         case static_cast<int>(Tool::Step): return T(Str::TipStep);

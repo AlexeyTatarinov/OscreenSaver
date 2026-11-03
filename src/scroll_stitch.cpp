@@ -92,7 +92,13 @@ Stitcher::Result Stitcher::Add(const Frame& next) {
     body_.insert(body_.end(), next.pixels + static_cast<size_t>(from) * width_,
                  next.pixels + static_cast<size_t>(contentEnd) * width_);
     last_.assign(next.pixels, next.pixels + static_cast<size_t>(width_) * height_);
+    lastShift_ = shift;
     return Result::Added;
+}
+
+int Stitcher::Height() const {
+    const int body = static_cast<int>(body_.size() / static_cast<size_t>(std::max(1, width_)));
+    return body + (bandsKnown_ ? bands_.bottom : 0);
 }
 
 std::vector<uint32_t> Stitcher::Picture(int& width, int& height) const {

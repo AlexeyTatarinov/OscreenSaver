@@ -11,6 +11,7 @@
 //      are kept once: at the top and at the bottom.
 //   4. When a new picture is the same as the previous one, the end of the page is reached.
 // This file is step 3: pure picture comparison, independent of Windows, with its own test.
+// Steps 1, 2 and 4 are in longshot.cpp.
 
 #include <cstdint>
 #include <vector>
@@ -50,6 +51,11 @@ public:
     // The tall picture so far, including the fixed bottom bar of the last picture.
     std::vector<uint32_t> Picture(int& width, int& height) const;
 
+    // How many pixels the content moved at the last successful Add, and the height so far.
+    int LastShift() const { return lastShift_; }
+    int Height() const;
+    int ContentHeight() const { return height_ - bands_.top - bands_.bottom; }
+
 private:
     int width_;
     int height_;
@@ -57,6 +63,7 @@ private:
     std::vector<uint32_t> last_;     // the previous picture
     FixedBands bands_;
     bool bandsKnown_ = false;
+    int lastShift_ = 0;
 };
 
 }  // namespace scroll

@@ -22,7 +22,8 @@ constexpr int kRedo = kUndo + 1;
 constexpr int kAddArea = kRedo + 1;                       // one more area for a side-by-side picture
 constexpr int kFrames = kAddArea + 1;                     // frames around joined areas on/off
 constexpr int kOcr = kFrames + 1;                         // copy the text from the picture
-constexpr int kPin = kOcr + 1;                            // pin the picture on top of all windows
+constexpr int kLong = kOcr + 1;                           // long screenshot with scrolling
+constexpr int kPin = kLong + 1;                           // pin the picture on top of all windows
 constexpr int kCopy = kPin + 1;                           // copy only, no file
 constexpr int kSave = kCopy + 1;
 constexpr int kClose = kSave + 1;
@@ -42,6 +43,7 @@ struct State {
     bool canUndo = false;
     bool canRedo = false;
     bool canAddArea = false;
+    bool canLong = false;
     bool compare = false;  // several areas: the frame button is shown
     bool frames = true;
     int hover = kNone;

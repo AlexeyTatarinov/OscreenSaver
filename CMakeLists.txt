@@ -34,6 +34,7 @@ add_executable(OscreenSaver WIN32
     src/settings.cpp
     src/pin.cpp
     src/ocr.cpp
+    src/longshot.cpp
     src/autostart.cpp
     src/i18n.cpp
     res/app.rc

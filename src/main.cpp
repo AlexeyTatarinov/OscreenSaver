@@ -18,8 +18,10 @@
 #include "autostart.h"
 #include "config.h"
 #include "i18n.h"
+#include "longshot.h"
 #include "ocr.h"
 #include "overlay.h"
+#include "save.h"
 #include "settings.h"
 
 namespace {
@@ -32,6 +34,7 @@ constexpr UINT WM_APP_TRAY = WM_APP + 2;
 constexpr UINT WM_APP_OVERLAY_KEY = WM_APP + 3;
 constexpr UINT WM_APP_SETTINGS_CHANGED = WM_APP + 4;
 constexpr UINT WM_APP_OCR_DONE = WM_APP + 5;
+constexpr UINT WM_APP_LONG_DONE = WM_APP + 6;
 constexpr UINT kTrayId = 1;
 
 enum MenuId : UINT { IdCapture = 100, IdSettings, IdExit };
@@ -58,6 +61,10 @@ LRESULT CALLBACK KeyboardHook(int code, WPARAM wp, LPARAM lp) {
     if (code == HC_ACTION && !IsSettingsOpen()) {  // in the settings window the shortcut is being typed
         const auto* key = reinterpret_cast<const KBDLLHOOKSTRUCT*>(lp);
         const bool down = wp == WM_KEYDOWN || wp == WM_SYSKEYDOWN;
+        if (key->vkCode == VK_ESCAPE && IsLongShotRunning()) {
+            if (wp == WM_KEYDOWN) StopLongShot();  // keep what was captured so far
+            return 1;
+        }
         const Config& cfg = Cfg();
         if (key->vkCode == cfg.hotkeyVk) {
             if (down && ModifiersMatch(cfg.hotkeyMods)) {
@@ -134,6 +141,41 @@ void CopyTextToClipboard(const std::wstring& text) {
     CloseClipboard();
 }
 
+// The long picture is saved and/or copied like any screenshot.
+void FinishLongScreenshot(LongShotResult* r) {
+    if (!r) return;
+    if (!r->scrolled || r->width <= 0 || r->height <= 0) {
+        ShowNotice(T(Str::AppName), T(Str::LongFailed), NIIF_WARNING);
+        delete r;
+        return;
+    }
+    Snapshot picture;
+    if (!CreateBlankSnapshot(r->width, r->height, picture)) {
+        NotifySaveFailed();
+        delete r;
+        return;
+    }
+    memcpy(picture.pixels, r->pixels.data(), r->pixels.size() * 4);
+    const RECT all = {0, 0, r->width, r->height};
+    wchar_t size[64];
+    swprintf(size, 64, T(Str::LongDoneText), r->width, r->height);
+    delete r;
+    CopyAreaToClipboard(picture, all, g_main);
+    if (Cfg().clipboardOnly) {
+        g_lastSaved.clear();
+        ShowNotice(T(Str::LongDoneTitle), size, NIIF_INFO);
+    } else {
+        std::wstring path;
+        if (SaveArea(picture, all, path)) {
+            g_lastSaved = path;
+            ShowNotice(T(Str::LongDoneTitle), size, NIIF_INFO);
+        } else {
+            NotifySaveFailed();
+        }
+    }
+    FreeSnapshot(picture);
+}
+
 void ShowTrayMenu() {
     HMENU menu = CreatePopupMenu();
     const std::wstring capture = std::wstring(T(Str::MenuCapture)) + L"\t" +
@@ -160,7 +202,10 @@ void ShowTrayMenu() {
 LRESULT CALLBACK MainProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
         case WM_APP_CAPTURE:
-            OpenOverlay(g_instance);
+            if (!IsLongShotRunning()) OpenOverlay(g_instance);
+            return 0;
+        case WM_APP_LONG_DONE:
+            FinishLongScreenshot(reinterpret_cast<LongShotResult*>(lp));
             return 0;
         case WM_APP_OCR_DONE: {
             std::wstring* text = reinterpret_cast<std::wstring*>(lp);
@@ -218,6 +263,10 @@ void NotifyCopied() {
 
 void StartTextRecognition(Snapshot picture) {
     RecognizeText(picture, g_main, WM_APP_OCR_DONE);
+}
+
+void StartLongScreenshot(const RECT& screenArea) {
+    StartLongShot(screenArea, g_main, WM_APP_LONG_DONE);
 }
 
 void NotifySaveFailed() {

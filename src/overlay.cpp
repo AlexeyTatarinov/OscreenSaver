@@ -366,6 +366,7 @@ toolbar::State PanelState(const Overlay& o) {
     st.canUndo = !o.undo.empty();
     st.canRedo = !o.redo.empty();
     st.canAddArea = o.hasSelection && AreaCount() < kMaxAreas;
+    st.canLong = o.hasSelection && !CompareMode();
     st.compare = CompareMode();
     st.frames = Cfg().frames;
     st.hover = o.hover;
@@ -1509,6 +1510,16 @@ bool StartAreaWithCtrl(Overlay& o, POINT p) {
     return true;
 }
 
+// Long screenshot: the frozen screen closes, and the real window under the selection is scrolled.
+// Drawings on the frozen screen are not part of the long picture.
+void StartLongFromSelection(Overlay& o) {
+    if (!o.hasSelection || CompareMode()) return;
+    const RECT area = {o.selection.left + o.shot.bounds.left, o.selection.top + o.shot.bounds.top,
+                       o.selection.right + o.shot.bounds.left, o.selection.bottom + o.shot.bounds.top};
+    CloseAll();
+    StartLongScreenshot(area);
+}
+
 void OnPanelClick(Overlay& o, int id) {
     using namespace toolbar;
     if (id < kFirstColor) SelectTool(o, static_cast<Tool>(id));
@@ -1530,6 +1541,7 @@ void OnPanelClick(Overlay& o, int id) {
         SaveConfig();
     }
     else if (id == kOcr) FinishSession(Finishing::Text);
+    else if (id == kLong) StartLongFromSelection(o);
     else if (id == kPin) FinishSession(Finishing::Pin);
     else if (id == kCopy) FinishSession(Finishing::CopyOnly);
     else if (id == kSave) Finish(o);

@@ -105,6 +105,11 @@ const wchar_t* const kStrings[][3] = {
     /* SetName */ {L"File name:", L"Имя файла:", L"Ім’я файлу:"},
     /* SetNameHint */ {L"%Y year, %m month, %d day, %H hour, %M minutes, %S seconds", L"%Y год, %m месяц, %d день, %H час, %M минуты, %S секунды", L"%Y рік, %m місяць, %d день, %H година, %M хвилини, %S секунди"},
     /* SetClipboardOnly */ {L"Do not save files, only copy to the clipboard (Enter)", L"Не сохранять файл, только копировать в буфер (Enter)", L"Не зберігати файл, лише копіювати в буфер (Enter)"},
+    /* TipLong */ {L"Long screenshot with scrolling: select the part of a window that scrolls", L"Длинный снимок с прокруткой: выделите прокручиваемую часть окна", L"Довгий знімок із прокручуванням: виділіть частину вікна, що прокручується"},
+    /* LongStatus */ {L"Long screenshot: scrolling…  %d px  •  Esc — stop", L"Длинный снимок: прокрутка…  %d px  •  Esc — остановить", L"Довгий знімок: прокручування…  %d px  •  Esc — зупинити"},
+    /* LongDoneTitle */ {L"Long screenshot is ready", L"Длинный снимок готов", L"Довгий знімок готовий"},
+    /* LongDoneText */ {L"%d × %d px", L"%d × %d px", L"%d × %d px"},
+    /* LongFailed */ {L"The window under the area did not scroll with the mouse wheel.", L"Окно под областью не прокручивается колесом мыши.", L"Вікно під областю не прокручується коліщатком миші."},
 };
 
 }  // namespace
