@@ -47,7 +47,7 @@ COLORREF g_background = 0;
 COLORREF g_customColors[16] = {};
 float g_scale = 1.f;
 
-int S(float v) { return static_cast<int>(v * g_scale + 0.5f); }
+int S(int v) { return static_cast<int>(static_cast<float>(v) * g_scale + 0.5f); }
 
 HWND Add(HWND parent, const wchar_t* cls, const wchar_t* text, DWORD style, int x, int y, int w, int h, int id) {
     HWND c = CreateWindowExW(0, cls, text, WS_CHILD | WS_VISIBLE | style, S(x), S(y), S(w), S(h), parent,
