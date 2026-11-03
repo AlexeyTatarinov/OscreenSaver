@@ -18,6 +18,10 @@ struct Config {
     int jpgQuality = 90;           // 1..100
     std::wstring nameTemplate = L"OscreenSaver_%Y-%m-%d_%H-%M-%S";  // %Y %m %d %H %M %S = date and time
     bool clipboardOnly = false;    // Enter copies to the clipboard without saving a file
+
+    // Sound after saving or copying: 0 shutter, 1 click, 2 chime, 3 own file.
+    int sound = 0;
+    std::wstring soundFile;
 };
 
 // Folder where screenshots are saved (the chosen one, or Pictures\OscreenSaver).

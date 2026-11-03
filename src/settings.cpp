@@ -10,6 +10,7 @@
 #include "config.h"
 #include "i18n.h"
 #include "save.h"
+#include "sound.h"
 
 namespace {
 
@@ -29,6 +30,9 @@ enum Id : int {
     IdName,
     IdNamePreview,
     IdClipboardOnly,
+    IdSound,
+    IdSoundPlay,
+    IdSoundFile,
 };
 
 const int kQualities[] = {100, 95, 90, 80, 70};
@@ -55,6 +59,8 @@ HWND g_owner = nullptr;
 UINT g_changedMessage = 0;
 HFONT g_font = nullptr;
 COLORREF g_background = 0;
+std::wstring g_soundFile;
+int g_soundSel = 0;
 COLORREF g_customColors[16] = {};
 float g_scale = 1.f;
 
@@ -82,6 +88,50 @@ void UpdatePreview() {
                                  (png ? L".png" : L".jpg");
     SetDlgItemTextW(g_window, IdNamePreview, preview.c_str());
     EnableWindow(GetDlgItem(g_window, IdQuality), !png);
+}
+
+void UpdateSoundFile() {
+    const bool own = g_soundSel == static_cast<int>(SaveSound::File);
+    SetDlgItemTextW(g_window, IdSoundFile, own ? g_soundFile.c_str() : L"");
+}
+
+// Windows file picker for an own sound (WAV).
+bool PickSoundFile() {
+    IFileOpenDialog* dialog = nullptr;
+    if (FAILED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dialog)))) {
+        return false;
+    }
+    const COMDLG_FILTERSPEC types[] = {{T(Str::SoundFilter), L"*.wav"}};
+    dialog->SetFileTypes(1, types);
+    DWORD options = 0;
+    dialog->GetOptions(&options);
+    dialog->SetOptions(options | FOS_FORCEFILESYSTEM | FOS_FILEMUSTEXIST);
+    bool picked = false;
+    if (SUCCEEDED(dialog->Show(g_window))) {
+        IShellItem* item = nullptr;
+        if (SUCCEEDED(dialog->GetResult(&item))) {
+            PWSTR path = nullptr;
+            if (SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH, &path))) {
+                g_soundFile = path;
+                picked = true;
+                CoTaskMemFree(path);
+            }
+            item->Release();
+        }
+    }
+    dialog->Release();
+    return picked;
+}
+
+void SoundChanged() {
+    const int sel = static_cast<int>(SendDlgItemMessageW(g_window, IdSound, CB_GETCURSEL, 0, 0));
+    if (sel == static_cast<int>(SaveSound::File) && !PickSoundFile() && g_soundFile.empty()) {
+        SendDlgItemMessageW(g_window, IdSound, CB_SETCURSEL, g_soundSel, 0);  // nothing chosen: keep the old one
+        return;
+    }
+    g_soundSel = sel;
+    UpdateSoundFile();
+    PlaySaveSound(static_cast<SaveSound>(g_soundSel), g_soundFile);
 }
 
 void Build(HWND w) {
@@ -144,16 +194,27 @@ void Build(HWND w) {
     CheckDlgButton(w, IdFrames, c.frames ? BST_CHECKED : BST_UNCHECKED);
 
     // General.
-    Add(w, L"BUTTON", T(Str::SetGroupGeneral), BS_GROUPBOX, left, 480, width, 54, 0);
+    Add(w, L"BUTTON", T(Str::SetGroupGeneral), BS_GROUPBOX, left, 480, width, 106, 0);
     Add(w, L"BUTTON", T(Str::MenuAutostart), BS_AUTOCHECKBOX | WS_TABSTOP, inner, 502, width - 24, 22, IdAutostart);
     CheckDlgButton(w, IdAutostart, IsAutostartEnabled() ? BST_CHECKED : BST_UNCHECKED);
+    Add(w, L"STATIC", T(Str::SetSound), SS_LEFT, inner, 534, 124, 20, 0);
+    HWND sound = Add(w, WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_TABSTOP, field, 530, fieldW - 40, 160, IdSound);
+    for (Str s : {Str::SoundShutter, Str::SoundClick, Str::SoundChime, Str::SoundFile}) {
+        SendMessageW(sound, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(T(s)));
+    }
+    g_soundFile = c.soundFile;
+    g_soundSel = (c.sound >= 0 && c.sound < static_cast<int>(SaveSound::Count)) ? c.sound : 0;
+    SendMessageW(sound, CB_SETCURSEL, g_soundSel, 0);
+    Add(w, L"BUTTON", L"\u25B6", BS_PUSHBUTTON | WS_TABSTOP, field + fieldW - 34, 529, 34, 26, IdSoundPlay);
+    Add(w, L"STATIC", L"", SS_LEFT | SS_PATHELLIPSIS, field, 558, fieldW, 18, IdSoundFile);
 
-    Add(w, L"BUTTON", T(Str::SetOk), BS_DEFPUSHBUTTON | WS_TABSTOP, 242, 546, 80, 28, IDOK);
-    Add(w, L"BUTTON", T(Str::SetCancel), BS_PUSHBUTTON | WS_TABSTOP, 328, 546, 80, 28, IDCANCEL);
+    Add(w, L"BUTTON", T(Str::SetOk), BS_DEFPUSHBUTTON | WS_TABSTOP, 242, 598, 80, 28, IDOK);
+    Add(w, L"BUTTON", T(Str::SetCancel), BS_PUSHBUTTON | WS_TABSTOP, 328, 598, 80, 28, IDCANCEL);
 
     g_background = c.background;
     UpdateHotkeyEdit();
     UpdatePreview();
+    UpdateSoundFile();
 }
 
 std::wstring ItemText(int id) {
@@ -194,6 +255,8 @@ void Apply() {
     const std::wstring name = ItemText(IdName);
     if (!name.empty()) c.nameTemplate = name;
     c.clipboardOnly = Checked(IdClipboardOnly);
+    c.sound = g_soundSel;
+    c.soundFile = g_soundFile;
     SaveConfig();
     SetAutostart(Checked(IdAutostart));
     if (g_owner) PostMessageW(g_owner, g_changedMessage, 0, 0);
@@ -271,6 +334,12 @@ LRESULT CALLBACK Proc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
                 case IdFormat:
                     if (HIWORD(wp) == CBN_SELCHANGE) UpdatePreview();
                     return 0;
+                case IdSound:
+                    if (HIWORD(wp) == CBN_SELCHANGE) SoundChanged();
+                    return 0;
+                case IdSoundPlay:
+                    PlaySaveSound(static_cast<SaveSound>(g_soundSel), g_soundFile);
+                    return 0;
                 case IdName:
                     if (HIWORD(wp) == EN_CHANGE) UpdatePreview();
                     return 0;
@@ -346,7 +415,7 @@ void ShowSettings(HINSTANCE instance, HWND owner, UINT changedMessage) {
     g_font = CreateFontIndirectW(&ncm.lfMessageFont);
 
     const DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU;
-    RECT frame = {0, 0, S(420), S(586)};
+    RECT frame = {0, 0, S(420), S(638)};
     AdjustWindowRectExForDpi(&frame, style, FALSE, 0, dpi);
     const int w = frame.right - frame.left, h = frame.bottom - frame.top;
     MONITORINFO mi = {sizeof(mi)};

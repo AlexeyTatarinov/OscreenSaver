@@ -112,6 +112,12 @@ const wchar_t* const kStrings[][3] = {
     /* LongFailed */ {L"The window did not scroll. Select the part of the window that scrolls, then turn the mouse wheel down while the long screenshot runs.", L"Окно не прокрутилось. Выделите прокручиваемую часть окна и во время съёмки крутите колесо мыши вниз.", L"Вікно не прокрутилося. Виділіть частину вікна, що прокручується, і під час зйомки крутіть коліщатко миші вниз."},
     /* LongManual */ {L"Turn the mouse wheel down slowly  •  %d px  •  Enter or Esc — finish", L"Крутите колесо мыши вниз, не спеша  •  %d px  •  Enter или Esc — готово", L"Крутіть коліщатко миші вниз, не поспішаючи  •  %d px  •  Enter або Esc — готово"},
     /* LongTooFast */ {L"Too fast — scroll back up a little  •  %d px  •  Enter or Esc — finish", L"Слишком быстро — прокрутите немного назад  •  %d px  •  Enter или Esc — готово", L"Занадто швидко — прокрутіть трохи назад  •  %d px  •  Enter або Esc — готово"},
+    /* SetSound */ {L"Sound when saved:", L"Звук при сохранении:", L"Звук при збереженні:"},
+    /* SoundShutter */ {L"Camera shutter", L"Затвор фотоаппарата", L"Затвор фотоапарата"},
+    /* SoundClick */ {L"Soft click", L"Мягкий щелчок", L"М’яке клацання"},
+    /* SoundChime */ {L"Short chime", L"Короткий сигнал", L"Короткий сигнал"},
+    /* SoundFile */ {L"Own file…", L"Свой файл…", L"Власний файл…"},
+    /* SoundFilter */ {L"Sound (WAV)", L"Звук (WAV)", L"Звук (WAV)"},
 };
 
 }  // namespace

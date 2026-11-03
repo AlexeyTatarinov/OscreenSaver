@@ -23,6 +23,7 @@
 #include "overlay.h"
 #include "save.h"
 #include "settings.h"
+#include "sound.h"
 
 namespace {
 
@@ -164,11 +165,13 @@ void FinishLongScreenshot(LongShotResult* r) {
     if (Cfg().clipboardOnly) {
         g_lastSaved.clear();
         ShowNotice(T(Str::LongDoneTitle), size, NIIF_INFO);
+        PlaySaveSound();
     } else {
         std::wstring path;
         if (SaveArea(picture, all, path)) {
             g_lastSaved = path;
             ShowNotice(T(Str::LongDoneTitle), size, NIIF_INFO);
+            PlaySaveSound();
         } else {
             NotifySaveFailed();
         }
@@ -254,11 +257,13 @@ LRESULT CALLBACK MainProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 void NotifySaved(const std::wstring& path) {
     g_lastSaved = path;
     ShowNotice(T(Str::SavedTitle), T(Str::SavedText), NIIF_INFO);
+    PlaySaveSound();
 }
 
 void NotifyCopied() {
     g_lastSaved.clear();  // nothing to open on a click
     ShowNotice(T(Str::CopiedTitle), T(Str::CopiedText), NIIF_INFO);
+    PlaySaveSound();
 }
 
 void StartTextRecognition(Snapshot picture) {

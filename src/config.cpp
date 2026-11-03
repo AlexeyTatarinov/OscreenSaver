@@ -51,6 +51,8 @@ void LoadConfig() {
     g_config.jpgQuality = static_cast<int>(ReadDword(key, L"JpgQuality", defaults.jpgQuality));
     g_config.nameTemplate = ReadString(key, L"NameTemplate", defaults.nameTemplate);
     g_config.clipboardOnly = ReadDword(key, L"ClipboardOnly", defaults.clipboardOnly) != 0;
+    g_config.sound = static_cast<int>(ReadDword(key, L"Sound", static_cast<DWORD>(defaults.sound)));
+    g_config.soundFile = ReadString(key, L"SoundFile", defaults.soundFile);
     if (g_config.hotkeyVk == 0 || g_config.hotkeyVk > 0xFE) g_config.hotkeyVk = defaults.hotkeyVk;
     if (g_config.jpgQuality < 1 || g_config.jpgQuality > 100) g_config.jpgQuality = defaults.jpgQuality;
     if (g_config.nameTemplate.empty()) g_config.nameTemplate = defaults.nameTemplate;
@@ -73,6 +75,8 @@ void SaveConfig() {
     WriteDword(key, L"JpgQuality", static_cast<DWORD>(g_config.jpgQuality));
     WriteString(key, L"NameTemplate", g_config.nameTemplate);
     WriteDword(key, L"ClipboardOnly", g_config.clipboardOnly ? 1 : 0);
+    WriteDword(key, L"Sound", static_cast<DWORD>(g_config.sound));
+    WriteString(key, L"SoundFile", g_config.soundFile);
     RegCloseKey(key);
 }
 

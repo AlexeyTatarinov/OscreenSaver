@@ -32,6 +32,7 @@ add_executable(OscreenSaver WIN32
     src/toolbar.cpp
     src/config.cpp
     src/settings.cpp
+    src/sound.cpp
     src/pin.cpp
     src/ocr.cpp
     src/longshot.cpp
@@ -46,7 +47,7 @@ if(MSVC)
     target_compile_options(OscreenSaver PRIVATE /bigobj)
 endif()
 
-target_link_libraries(OscreenSaver PRIVATE user32 gdi32 shell32 advapi32 shcore ole32 oleaut32 windowscodecs uuid gdiplus comdlg32 comctl32 dwmapi)
+target_link_libraries(OscreenSaver PRIVATE user32 gdi32 shell32 advapi32 shcore ole32 oleaut32 windowscodecs uuid gdiplus comdlg32 comctl32 dwmapi winmm)
 
 # Groundwork for the long screenshot with scrolling: picture stitching and its test.
 add_library(scroll_stitch STATIC src/scroll_stitch.cpp)

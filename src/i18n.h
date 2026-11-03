@@ -26,7 +26,7 @@ enum class Str {
     PinCopy, PinSave, PinActualSize, PinClose, CopiedTitle, CopiedText, OcrDoneTitle, OcrNone, OcrUnavailable,
     ColorCopied, TipStep, TipPicker, TipCopy, TipPin, TipOcr,
     SetGroupSave, SetFolder, SetBrowse, SetFormat, SetQuality, SetName, SetNameHint, SetClipboardOnly,
-    TipLong, LongStatus, LongDoneTitle, LongDoneText, LongFailed, LongManual, LongTooFast,
+    TipLong, LongStatus, LongDoneTitle, LongDoneText, LongFailed, LongManual, LongTooFast, SetSound, SoundShutter, SoundClick, SoundChime, SoundFile, SoundFilter,
 };
 
 void InitLanguage();
