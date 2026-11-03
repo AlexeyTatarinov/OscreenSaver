@@ -1,7 +1,12 @@
 cmake_minimum_required(VERSION 3.20)
 project(OscreenSaver VERSION 0.1.0 LANGUAGES CXX RC)
 
-set(CMAKE_CXX_STANDARD 17)
+# C++20 with Visual Studio: text recognition (C++/WinRT) needs standard coroutines.
+if(MSVC)
+    set(CMAKE_CXX_STANDARD 20)
+else()
+    set(CMAKE_CXX_STANDARD 17)
+endif()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Static runtime: the .exe runs on any Windows 10/11 x64 without extra installs.
