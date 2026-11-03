@@ -230,6 +230,9 @@ HWND CreateStatus(const RECT& area) {
     if (y < area.bottom && y + height > area.top) y = std::max<int>(wa.top, area.top - height - gap);
     HWND w = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, kStatusClass, L"OscreenSaver",
                              WS_POPUP, x, y, width, height, nullptr, nullptr, instance, nullptr);
+    // The hint must never get into the pictures, even when it covers the area (Windows 10 2004+).
+    constexpr DWORD kExcludeFromCapture = 0x00000011;  // WDA_EXCLUDEFROMCAPTURE
+    SetWindowDisplayAffinity(w, kExcludeFromCapture);
     ShowWindow(w, SW_SHOWNOACTIVATE);
     UpdateWindow(w);
     return w;
