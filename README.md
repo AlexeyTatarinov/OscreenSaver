@@ -122,4 +122,10 @@ Details are in [`res/sounds/CREDITS.md`](res/sounds/CREDITS.md).
 
 **Alexey Tatarinov** — idea, design and requirements.
 
-Copyright © 2026 Alexey Tatarinov. All rights reserved.
+## License
+
+OscreenSaver is released under the [MIT License](LICENSE). You may use, copy, change and share it freely,
+as long as the copyright notice with the author's name is kept.
+
+Copyright © 2026 Alexey Tatarinov.
+The two recorded sounds keep their own licences (see Credits).
