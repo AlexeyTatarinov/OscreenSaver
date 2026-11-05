@@ -89,9 +89,80 @@ HWND Add(HWND parent, const wchar_t* cls, const wchar_t* text, DWORD style, int 
 
 bool Checked(int id) { return IsDlgButtonChecked(g_window, id) == BST_CHECKED; }
 
+// Own shortcut field. The standard Windows hotkey field shows the word "None" in the language of
+// Windows, not of the program, so the field is an ordinary text box that listens to the keys itself.
+UINT g_customVk = 0, g_customMods = 0;
+
+void ShowCustomHotkey() {
+    HWND edit = GetDlgItem(g_window, IdHotkeyEdit);
+    const int sel = static_cast<int>(SendDlgItemMessageW(g_window, IdHotkeyList, CB_GETCURSEL, 0, 0));
+    if (sel != kPresetCount) {
+        SetWindowTextW(edit, T(Str::SetHotkeyLocked));  // tells how to make the field work
+    } else {
+        SetWindowTextW(edit, g_customVk ? HotkeyName(g_customVk, g_customMods).c_str() : L"");
+    }
+}
+
 void UpdateHotkeyEdit() {
     const int sel = static_cast<int>(SendDlgItemMessageW(g_window, IdHotkeyList, CB_GETCURSEL, 0, 0));
     EnableWindow(GetDlgItem(g_window, IdHotkeyEdit), sel == kPresetCount);
+    ShowCustomHotkey();
+}
+
+bool IsModifier(UINT vk) {
+    switch (vk) {
+        case VK_SHIFT: case VK_LSHIFT: case VK_RSHIFT:
+        case VK_CONTROL: case VK_LCONTROL: case VK_RCONTROL:
+        case VK_MENU: case VK_LMENU: case VK_RMENU:
+        case VK_LWIN: case VK_RWIN:
+            return true;
+    }
+    return false;
+}
+
+LRESULT CALLBACK HotkeyFieldProc(HWND w, UINT msg, WPARAM wp, LPARAM lp, UINT_PTR, DWORD_PTR) {
+    switch (msg) {
+        case WM_GETDLGCODE:
+            return DLGC_WANTALLKEYS;
+        case WM_KEYDOWN:
+        case WM_SYSKEYDOWN: {
+            const UINT vk = static_cast<UINT>(wp);
+            const bool ctrl = GetKeyState(VK_CONTROL) < 0, shift = GetKeyState(VK_SHIFT) < 0,
+                       alt = GetKeyState(VK_MENU) < 0;
+            if (!ctrl && !alt) {  // plain keys keep their usual meaning in the window
+                if (vk == VK_TAB) {
+                    SendMessageW(g_window, WM_NEXTDLGCTL, shift ? 1 : 0, 0);
+                    return 0;
+                }
+                if (vk == VK_ESCAPE || vk == VK_RETURN) {
+                    PostMessageW(g_window, WM_COMMAND, vk == VK_ESCAPE ? IDCANCEL : IDOK, 0);
+                    return 0;
+                }
+                if ((vk == VK_BACK || vk == VK_DELETE) && !shift) {
+                    g_customVk = g_customMods = 0;
+                    ShowCustomHotkey();
+                    return 0;
+                }
+            }
+            if (!IsModifier(vk)) {
+                g_customVk = vk;
+                g_customMods = (ctrl ? HOTKEYF_CONTROL : 0) | (shift ? HOTKEYF_SHIFT : 0) | (alt ? HOTKEYF_ALT : 0);
+                ShowCustomHotkey();
+            }
+            return 0;
+        }
+        case WM_CHAR:
+        case WM_SYSCHAR:
+        case WM_KEYUP:
+        case WM_SYSKEYUP:
+            return 0;  // nothing is typed into the field
+        case WM_PASTE:
+        case WM_CUT:
+        case WM_CLEAR:
+        case WM_CONTEXTMENU:
+            return 0;
+    }
+    return DefSubclassProc(w, msg, wp, lp);
 }
 
 void UpdatePreview() {
@@ -166,10 +237,12 @@ void Build(HWND w) {
     SendMessageW(list, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(T(Str::SetHotkeyCustom)));
     SendMessageW(list, CB_SETCURSEL, selected, 0);
     Add(w, L"STATIC", T(Str::SetHotkeyHint), SS_LEFT, inner, 64, width - 24, 34, 0);
-    HWND edit = Add(w, HOTKEY_CLASSW, L"", WS_TABSTOP | WS_BORDER, field, 98, fieldW, 24, IdHotkeyEdit);
-    if (selected == kPresetCount) {
-        SendMessageW(edit, HKM_SETHOTKEY, MAKEWORD(c.hotkeyVk, c.hotkeyMods), 0);
-    }
+    HWND edit = Add(w, L"EDIT", L"", WS_TABSTOP | WS_BORDER | ES_READONLY | ES_AUTOHSCROLL, field, 98, fieldW, 24,
+                    IdHotkeyEdit);
+    SendMessageW(edit, EM_SETCUEBANNER, TRUE, reinterpret_cast<LPARAM>(T(Str::SetHotkeyPress)));
+    SetWindowSubclass(edit, HotkeyFieldProc, 1, 0);
+    g_customVk = selected == kPresetCount ? c.hotkeyVk : 0;
+    g_customMods = selected == kPresetCount ? c.hotkeyMods : 0;
     Add(w, L"BUTTON", T(Str::SetMagnifier), BS_AUTOCHECKBOX | WS_TABSTOP, inner, 128, width - 24, 22, IdMagnifier);
     CheckDlgButton(w, IdMagnifier, c.magnifier ? BST_CHECKED : BST_UNCHECKED);
 
@@ -251,10 +324,9 @@ void Apply() {
         c.hotkeyVk = kPresets[sel].vk;
         c.hotkeyMods = kPresets[sel].mods;
     } else {
-        const WORD hk = static_cast<WORD>(SendDlgItemMessageW(g_window, IdHotkeyEdit, HKM_GETHOTKEY, 0, 0));
-        if (LOBYTE(hk) != 0) {  // an empty field keeps the previous shortcut
-            c.hotkeyVk = LOBYTE(hk);
-            c.hotkeyMods = HIBYTE(hk) & (HOTKEYF_SHIFT | HOTKEYF_CONTROL | HOTKEYF_ALT);
+        if (g_customVk != 0) {  // an empty field keeps the previous shortcut
+            c.hotkeyVk = g_customVk;
+            c.hotkeyMods = g_customMods;
         }
     }
     c.magnifier = Checked(IdMagnifier);
@@ -346,7 +418,11 @@ LRESULT CALLBACK Proc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
         case WM_COMMAND:
             switch (LOWORD(wp)) {
                 case IdHotkeyList:
-                    if (HIWORD(wp) == CBN_SELCHANGE) UpdateHotkeyEdit();
+                    if (HIWORD(wp) == CBN_SELCHANGE) {
+                        UpdateHotkeyEdit();
+                        const int sel = static_cast<int>(SendDlgItemMessageW(w, IdHotkeyList, CB_GETCURSEL, 0, 0));
+                        if (sel == kPresetCount) SetFocus(GetDlgItem(w, IdHotkeyEdit));
+                    }
                     return 0;
                 case IdBackground:
                     PickBackground();
