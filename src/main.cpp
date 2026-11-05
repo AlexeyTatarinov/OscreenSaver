@@ -226,7 +226,8 @@ LRESULT CALLBACK MainProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         }
         case WM_APP_SETTINGS_CHANGED:
-            AddTrayIcon();  // the hint shows the new shortcut
+            InitLanguage();
+            AddTrayIcon();  // the hint shows the new shortcut and language
             return 0;
         case WM_APP_OVERLAY_KEY:
             OverlayKey(static_cast<unsigned>(wp));
@@ -280,6 +281,7 @@ void NotifySaveFailed() {
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     g_instance = instance;
+    LoadConfig();
     InitLanguage();
 
     HANDLE mutex = CreateMutexW(nullptr, TRUE, kMutexName);
@@ -289,7 +291,6 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
         return 0;
     }
 
-    LoadConfig();
     ApplyFirstRunAutostart();
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);  // needed for JPG encoding
     StartGraphics();                                    // smooth (anti-aliased) drawing

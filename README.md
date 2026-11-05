@@ -1,140 +1,125 @@
 # OscreenSaver
 
-Программа для снимков экрана в Windows 10/11 (x64).
-Інтерфейс: українська, русский, English (выбирается по языку Windows).
+**Author: Alexey Tatarinov**
 
-## Как получить программу
+OscreenSaver is a lightweight screenshot tool for Windows 10 and 11 (x64). Press **PrintScreen**, select an
+area, mark it up and save it in a few seconds. The program runs quietly in the background, uses almost no
+memory or processor time, and needs no installation.
 
-1. Откройте вкладку **Actions** в этом репозитории.
-2. Выберите последнюю успешную сборку **Build** (зелёная галочка).
-3. Внизу страницы, в разделе **Artifacts**, скачайте **OscreenSaver**.
-4. Распакуйте архив и запустите `OscreenSaver.exe`. Установка не нужна.
+Interface languages: **English** (default), **Ukrainian**, **Spanish** — chosen in the settings.
 
-## Что уже работает (этапы 1–3)
+## What it is for
 
-**Снимок**
-- Работа в фоне без окон, значок в области уведомлений (рядом с часами).
-- **PrintScreen** замораживает изображение монитора, на котором находится курсор.
-- Всё, что вне выделенной области, закрыто серой маской.
+- Quickly capturing part of the screen to send in a chat, an e-mail or a bug report.
+- Pointing at things: arrows, frames, numbered markers, text notes.
+- Hiding private data (passwords, names, account numbers) with blur before sharing.
+- Comparing several parts of the screen in one picture.
+- Capturing a whole long web page or document that does not fit on the screen.
+- Copying text or a colour from anything visible on the screen.
 
-**Выделение области** (кнопка с пунктирной рамкой или **Tab**)
-- Выделение мышью; перетаскивание выделения; изменение размера за маркеры.
-- Одиночный щелчок или **Ctrl+A** — весь экран. Правая кнопка мыши — сбросить выделение.
-- Размер выделения в пикселях показывается над рамкой.
+## How to use it
 
-**Рисование** — после первого выделения сразу включается карандаш.
-- Панель рядом с выделением: выделение области, выбор объектов, карандаш, маркер (полупрозрачный),
-  кисть (толстая), стрелка, прямоугольник, эллипс, размытие, текст, ластик.
-- Цвета: зелёный, красный, белый, чёрный и цветной круг — окно выбора любого цвета.
-- 3 толщины. Подсказка появляется при наведении на кнопку.
-- **Ctrl+Z** — отменить, **Ctrl+Y** — вернуть (и кнопки на панели). Отменяется всё: рисование, стирание,
-  перемещение, правка текста.
-- **Tab** — переключение между выделением области и последним инструментом.
+1. Press **PrintScreen** (or the shortcut chosen in the settings). The screen freezes.
+2. Drag with the mouse to select an area. A click on a window selects exactly that window;
+   a click on an empty place selects the whole screen.
+3. Draw on the selection with the tools on the panel next to it.
+4. Press **Enter** to save the picture and copy it to the clipboard, or **Esc** to close without saving.
 
-**Ластик** — два режима (кнопки появляются при выбранном ластике):
-- «Стирать объекты целиком» — удаляет линию, фигуру или текст, которых коснулся ластик.
-- «Стирать частично» — как в Paint: стирает только то, что под ластиком. Стёртая часть
-  перемещается и масштабируется вместе с объектом.
-- Чтобы закрасить часть экрана белым, используйте маркер или кисть белого цвета.
+A notice appears after saving; click it to open the folder with the file.
 
-**Снимок окна:** в режиме выделения области окно под курсором обводится рамкой — щелчок выделяет
-его точно по границам (щелчок мимо окон — весь экран).
+## Features
 
-**Нумерованные метки:** каждый щелчок ставит кружок со следующим номером (1, 2, 3…) текущего цвета;
-размер — кнопками толщины.
+**Capture**
+- Freezes the monitor under the mouse cursor; everything outside the selection is covered by a grey mask.
+- Window snapping: the window under the cursor is outlined and selected with one click.
+- Magnifier next to the cursor with pixel coordinates and colour (optional).
+- Several areas in one picture: hold **Ctrl** and drag (or use the "one more area" button) to add up to
+  4 areas, from one or different monitors. They are joined side by side on a black background
+  (colour and thin frames are configurable).
+- **Long screenshot with scrolling**: select the part of a window that scrolls and press the
+  long-screenshot button. The program scrolls the window and stitches the pictures together. If a
+  program does not react to automatic scrolling, turn the mouse wheel yourself. **Enter** or **Esc**
+  finishes.
 
-**Пипетка:** щелчок копирует цвет точки снимка в буфер обмена как #RRGGBB и делает его цветом
-рисования; рядом с курсором видна лупа.
+**Drawing tools**
+- Pencil, marker (semi-transparent), thick brush, arrow, rectangle, ellipse.
+- Text with mixed styles in one line: bold, italic, strikethrough, colour, size and any Windows font;
+  a text cursor for editing.
+- Blur for hiding private data.
+- Numbered markers 1, 2, 3…
+- Eyedropper: copies the colour under the cursor as #RRGGBB.
+- Eraser with two modes: remove whole objects, or erase parts like in Paint.
+- Selection tool: move, resize and delete drawn objects; click text to edit it.
+- Colours: green, red, white, black and any custom colour; three line sizes.
+- Unlimited undo and redo.
 
-**Выбор объектов** (стрелка-курсор)
-- Щелчок по объекту выделяет его рамкой: перетаскивание — перемещение, маркеры рамки — изменение размера.
-- Щелчок по тексту сразу открывает его для дописывания; текст можно и перетаскивать.
-- **Delete** удаляет выбранный объект.
+**After the capture**
+- Save to a file (JPG or PNG) and copy to the clipboard, or copy only.
+- Pin the picture on top of all windows (drag, zoom with the wheel).
+- Copy the text from the picture (Windows text recognition, works offline).
+- A sound after saving: camera shutter, soft click, chime, breaking glass, birds flying off,
+  or your own WAV file.
 
-**Текст**
-- Щелчок — место текста, **Enter** — готово, **Shift+Enter** — новая строка, **Esc** — отменить правку.
-- В одной строке можно смешивать оформление: кнопки **B** (жирный, Ctrl+B), **I** (курсив, Ctrl+I),
-  **S** (зачёркнутый), цвет, размер и **Aa** (окно шрифтов Windows) действуют только на следующие
-  набираемые буквы. Уже написанный текст не меняется.
-- Щелчок внутри текста ставит курсор в это место (инструментом «Текст» или «Выбор»).
-- **← →** — курсор на букву, **↑ ↓** — на строку, **Home / End** — начало / конец строки.
-- **Backspace** удаляет букву перед курсором, **Delete** — после курсора; новые буквы вставляются
-  в месте курсора. Кнопки оформления подхватывают вид буквы перед курсором.
+## Keyboard shortcuts
 
-**Размытие**
-- Обведите участок — он будет размыт на снимке (например, пароли или личные данные).
-- Кнопки толщины задают силу размытия. Размытый участок можно перемещать и масштабировать
-  инструментом выбора и удалять ластиком.
+| Key | Action |
+|---|---|
+| PrintScreen | Take a screenshot (can be changed in the settings) |
+| Enter / Ctrl+S | Save and copy |
+| Ctrl+C | Copy to the clipboard only |
+| Esc | Close without saving |
+| Tab | Switch between area selection and the last drawing tool |
+| Ctrl + drag | Add one more area |
+| Ctrl+A | Select the whole screen |
+| Ctrl+Z / Ctrl+Y | Undo / redo |
+| Delete | Delete the selected object |
+| Ctrl+B / Ctrl+I | Bold / italic text |
+| Enter / Shift+Enter (in text) | Finish the text / new line |
 
-**Сравнение: несколько областей в одной картинке**
-- Выделите первую область. Следующую область можно сделать, **удерживая Ctrl** и протянув мышью
-  за пределами уже выделенных областей (при любом выбранном инструменте), или кнопкой
-  «Добавить ещё область» (два прямоугольника с плюсом).
-- Выделите следующую область — на этом же или на другом мониторе. Всего до 4 областей; в углу каждой
-  виден её номер.
-- Активна одна область — с маркерами. Щелчок по другой области (в режиме выделения области) делает
-  активной её: её можно перемещать и менять размер. Номера областей при этом не меняются.
-- При сохранении области склеиваются в одну картинку без наложений: 2 — рядом слева направо,
-  3 — третья по центру под первыми двумя, 4 — квадрат 2 × 2. Свободное место заполняется чёрным.
-- Кнопка с сеткой из четырёх квадратов включает и выключает тонкую серую рамку вокруг каждой области
-  в итоговой картинке (по умолчанию включена).
+## Settings
 
-**Сохранение и другие действия с готовой картинкой**
-- **Enter**, **Ctrl+S**, зелёная галочка или двойной щелчок внутри выделения (в режиме выделения) —
-  сохранить и скопировать в буфер обмена. Папка, формат (JPG/PNG), качество JPG и шаблон имени файла
-  задаются в настройках (по умолчанию — «Изображения\OscreenSaver», JPG 90).
-  После сохранения появляется уведомление; щелчок по нему открывает папку с файлом.
-- **Ctrl+C** или кнопка «Только копировать» — в буфер обмена без файла. В настройках можно сделать
-  так, чтобы и Enter только копировал.
-- Кнопка с булавкой — **закрепить картинку поверх всех окон**: перетаскивание мышью, колесо — масштаб,
-  двойной щелчок или Esc — закрыть, правая кнопка — копировать, сохранить, исходный размер, закрыть.
-- Кнопка распознавания текста — **текст с картинки** копируется в буфер обмена (распознавание
-  Windows, без интернета; нужен установленный в Windows язык распознавания).
-- **Esc** или крестик на панели — закрыть без сохранения.
+Open the settings from the menu of the tray icon (next to the clock) → **Settings…**
 
-**Настройки** (меню значка рядом с часами → «Настройки…»)
-- Горячая клавиша снимка: популярные варианты (PrintScreen, Ctrl+PrintScreen, Shift+PrintScreen,
-  Ctrl+Shift+S, Ctrl+Shift+X, Ctrl+Alt+S, Alt+S, Ctrl+F12) или своя комбинация — выберите
-  последнюю строку списка, щёлкните поле и нажмите клавиши.
-- Лупа у курсора (по умолчанию выключена): при выделении области рядом с курсором видны
-  увеличенные пиксели, координаты и цвет точки под курсором.
-- Цвет фона склеенной картинки (по умолчанию чёрный) — щелчок по образцу цвета открывает палитру Windows.
-- Тонкая серая рамка вокруг областей при склейке.
-- Запуск вместе с Windows.
-- Настройки сохраняются и действуют после перезапуска.
+- Screenshot shortcut: popular presets or any custom combination.
+- Magnifier on or off.
+- Save folder, file format (JPG/PNG), JPG quality, file name template with date and time.
+- Copy to the clipboard only, without saving files.
+- Background colour and frames for pictures joined from several areas.
+- Interface language: English, Ukrainian, Spanish.
+- Start with Windows.
+- Sound after saving.
 
-**Прочее**
-- Если курсор не находится ни на одном мониторе, замораживаются все мониторы; нужный выбирается правой кнопкой мыши.
-- Автозапуск вместе с Windows (включается при первом запуске, отключается в меню значка).
-- Оформление в стиле Windows: светлая или тёмная тема и цвет акцента берутся из настроек Windows,
-  значки — из системного шрифта значков Windows (Segoe Fluent Icons / Segoe MDL2 Assets),
-  скруглённые углы и мягкая тень у панели.
-- Значок программы: OTS в штрихпунктирной рамке с курсором (рисуется скриптом `res/make_icon.py`).
+Settings are stored in the Windows registry under `HKCU\Software\OscreenSaver`.
 
-## Длинный снимок с прокруткой
+## Getting the program
 
-- Выделите прокручиваемую часть окна (например, текст страницы без шапки браузера) и нажмите на панели
-  кнопку «Длинный снимок» (страница со стрелкой вниз).
-- Экран «размораживается», программа сама прокручивает окно под областью колесом мыши, делает снимки
-  и склеивает их. Сверху экрана видно окно с текущей высотой. Курсор на время съёмки ставится в
-  центр области и потом возвращается.
-- Остановка: автоматически в конце страницы, при высоте 30 000 пикселей или по **Esc**
-  (сохранится то, что уже снято).
-- Готовая картинка сохраняется и копируется в буфер обмена по настройкам «Сохранение».
-- Неподвижные панели (шапка сайта, строка состояния) попадают в картинку один раз.
-- Рисунки, сделанные на замороженном экране, в длинный снимок не попадают.
-- Ядро склейки — `src/scroll_stitch.*`, тест — `tests/stitch_test.cpp` (запускается при каждой сборке).
+1. Open the **Actions** tab of this repository.
+2. Choose the latest successful **Build** run (green check mark).
+3. Download **OscreenSaver** from the **Artifacts** section at the bottom of the page.
+4. Unpack the archive and run `OscreenSaver.exe`. No installation is needed.
 
-## Звук после сохранения
+## Building from source
 
-После сохранения или копирования снимка звучит звук, выбранный в настройках («Общие» → «Звук при сохранении»): затвор фотоаппарата, мягкий щелчок, короткий сигнал, разбитое стекло, взлетающие птицы или свой файл WAV.
+Requirements: Visual Studio 2022 (C++ desktop workload) and CMake 3.20 or newer.
 
-Звуки «Разбитое стекло» (автор datasoundsample, Freesound, лицензия CC BY 4.0) и «Взлетающие птицы» (Pixel-boy & AAA, пакет Ninja Adventure, CC0) — подробности в `res/sounds/CREDITS.md`.
+```
+cmake -S . -B build -A x64
+cmake --build build --config Release
+ctest --test-dir build -C Release
+```
 
-## План
+The program is written in C++ with the Win32 API, GDI+, WIC and Windows.Media.Ocr; it has no external
+dependencies.
 
-- Этап 4: снимок нескольких мониторов сразу, собственный значок программы.
-- Этап 5: проверка нагрузки и стабильности, цифровая подпись.
+## Credits
 
----
+- Breaking glass sound: "glass shatter.wav" by datasoundsample, Freesound, licensed under CC BY 4.0.
+- Birds sound: wing sounds from the *Ninja Adventure* asset pack by Pixel-boy & AAA, CC0.
+
+Details are in [`res/sounds/CREDITS.md`](res/sounds/CREDITS.md).
+
+## Author
+
+**Alexey Tatarinov** — idea, design and requirements.
+
 Copyright © 2026 Alexey Tatarinov. All rights reserved.

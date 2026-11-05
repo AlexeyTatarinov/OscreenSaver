@@ -21,6 +21,8 @@ struct Config {
 
     // Sound after saving or copying: 0 shutter, 1 click, 2 chime, 3 own file.
     int sound = 0;
+
+    int language = 0;              // 0 English, 1 Ukrainian, 2 Spanish (enum Lang)
     std::wstring soundFile;
 };
 

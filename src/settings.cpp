@@ -33,6 +33,7 @@ enum Id : int {
     IdSound,
     IdSoundPlay,
     IdSoundFile,
+    IdLanguage,
 };
 
 const int kQualities[] = {100, 95, 90, 80, 70};
@@ -207,11 +208,17 @@ void Build(HWND w) {
     CheckDlgButton(w, IdFrames, c.frames ? BST_CHECKED : BST_UNCHECKED);
 
     // General.
-    Add(w, L"BUTTON", T(Str::SetGroupGeneral), BS_GROUPBOX, left, 480, width, 106, 0);
-    Add(w, L"BUTTON", T(Str::MenuAutostart), BS_AUTOCHECKBOX | WS_TABSTOP, inner, 502, width - 24, 22, IdAutostart);
+    Add(w, L"BUTTON", T(Str::SetGroupGeneral), BS_GROUPBOX, left, 480, width, 138, 0);
+    Add(w, L"STATIC", T(Str::SetLanguage), SS_LEFT, inner, 506, 124, 20, 0);
+    HWND language = Add(w, WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_TABSTOP, field, 502, fieldW - 40, 120, IdLanguage);
+    for (int i = 0; i < static_cast<int>(Lang::Count); ++i) {
+        SendMessageW(language, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(LanguageName(static_cast<Lang>(i))));
+    }
+    SendMessageW(language, CB_SETCURSEL, static_cast<int>(CurrentLanguage()), 0);
+    Add(w, L"BUTTON", T(Str::MenuAutostart), BS_AUTOCHECKBOX | WS_TABSTOP, inner, 534, width - 24, 22, IdAutostart);
     CheckDlgButton(w, IdAutostart, IsAutostartEnabled() ? BST_CHECKED : BST_UNCHECKED);
-    Add(w, L"STATIC", T(Str::SetSound), SS_LEFT, inner, 534, 124, 20, 0);
-    HWND sound = Add(w, WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_TABSTOP, field, 530, fieldW - 40, 200, IdSound);
+    Add(w, L"STATIC", T(Str::SetSound), SS_LEFT, inner, 566, 124, 20, 0);
+    HWND sound = Add(w, WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_TABSTOP, field, 562, fieldW - 40, 200, IdSound);
     for (Str s : {Str::SoundShutter, Str::SoundClick, Str::SoundChime, Str::SoundGlass, Str::SoundBirds,
                   Str::SoundFile}) {
         SendMessageW(sound, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(T(s)));
@@ -219,11 +226,11 @@ void Build(HWND w) {
     g_soundFile = c.soundFile;
     g_soundSel = RowOf(c.sound);  // g_soundSel is a row of the list
     SendMessageW(sound, CB_SETCURSEL, g_soundSel, 0);
-    Add(w, L"BUTTON", L"\u25B6", BS_PUSHBUTTON | WS_TABSTOP, field + fieldW - 34, 529, 34, 26, IdSoundPlay);
-    Add(w, L"STATIC", L"", SS_LEFT | SS_PATHELLIPSIS, field, 558, fieldW, 18, IdSoundFile);
+    Add(w, L"BUTTON", L"\u25B6", BS_PUSHBUTTON | WS_TABSTOP, field + fieldW - 34, 561, 34, 26, IdSoundPlay);
+    Add(w, L"STATIC", L"", SS_LEFT | SS_PATHELLIPSIS, field, 590, fieldW, 18, IdSoundFile);
 
-    Add(w, L"BUTTON", T(Str::SetOk), BS_DEFPUSHBUTTON | WS_TABSTOP, 242, 598, 80, 28, IDOK);
-    Add(w, L"BUTTON", T(Str::SetCancel), BS_PUSHBUTTON | WS_TABSTOP, 328, 598, 80, 28, IDCANCEL);
+    Add(w, L"BUTTON", T(Str::SetOk), BS_DEFPUSHBUTTON | WS_TABSTOP, 242, 630, 80, 28, IDOK);
+    Add(w, L"BUTTON", T(Str::SetCancel), BS_PUSHBUTTON | WS_TABSTOP, 328, 630, 80, 28, IDCANCEL);
 
     g_background = c.background;
     UpdateHotkeyEdit();
@@ -271,6 +278,8 @@ void Apply() {
     c.clipboardOnly = Checked(IdClipboardOnly);
     c.sound = static_cast<int>(SoundAt(g_soundSel));
     c.soundFile = g_soundFile;
+    const int lang = static_cast<int>(SendDlgItemMessageW(g_window, IdLanguage, CB_GETCURSEL, 0, 0));
+    if (lang >= 0 && lang < static_cast<int>(Lang::Count)) c.language = lang;
     SaveConfig();
     SetAutostart(Checked(IdAutostart));
     if (g_owner) PostMessageW(g_owner, g_changedMessage, 0, 0);
@@ -429,7 +438,7 @@ void ShowSettings(HINSTANCE instance, HWND owner, UINT changedMessage) {
     g_font = CreateFontIndirectW(&ncm.lfMessageFont);
 
     const DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU;
-    RECT frame = {0, 0, S(420), S(638)};
+    RECT frame = {0, 0, S(420), S(670)};
     AdjustWindowRectExForDpi(&frame, style, FALSE, 0, dpi);
     const int w = frame.right - frame.left, h = frame.bottom - frame.top;
     MONITORINFO mi = {sizeof(mi)};
