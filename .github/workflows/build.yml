@@ -3,8 +3,12 @@ name: Build
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   windows-x64:
@@ -27,3 +31,18 @@ jobs:
           name: OscreenSaver
           path: build/Release/OscreenSaver.exe
           if-no-files-found: error
+
+      - name: SHA-256 checksum
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        run: (Get-FileHash build/Release/OscreenSaver.exe -Algorithm SHA256).Hash | Out-File -Encoding ascii build/Release/OscreenSaver.exe.sha256
+
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $hash = Get-Content build/Release/OscreenSaver.exe.sha256
+          $notes = "OscreenSaver ${{ github.ref_name }} - screenshot tool for Windows 10/11 (x64). Author: Oleksii Tatarinov.`n`nDownload OscreenSaver.exe and run it; no installation is needed.`n`nSHA-256 of OscreenSaver.exe: $hash"
+          gh release create "${{ github.ref_name }}" build/Release/OscreenSaver.exe build/Release/OscreenSaver.exe.sha256 --title "OscreenSaver ${{ github.ref_name }}" --notes "$notes"

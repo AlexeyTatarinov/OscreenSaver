@@ -93,10 +93,12 @@ Settings are stored in the Windows registry under `HKCU\Software\OscreenSaver`.
 
 ## Getting the program
 
-1. Open the **Actions** tab of this repository.
-2. Choose the latest successful **Build** run (green check mark).
-3. Download **OscreenSaver** from the **Artifacts** section at the bottom of the page.
-4. Unpack the archive and run `OscreenSaver.exe`. No installation is needed.
+1. Open the [**Releases**](https://github.com/AlexeyTatarinov/OscreenSaver/releases/latest) page of this repository.
+2. Download `OscreenSaver.exe`.
+3. Run it. No installation is needed; the icon appears next to the clock.
+
+To check that the file is genuine, compare its SHA-256 checksum with the one shown on the release page:
+open PowerShell in the download folder and run `Get-FileHash OscreenSaver.exe`.
 
 ## Building from source
 
