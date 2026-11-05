@@ -6,6 +6,11 @@ on:
     tags: ['v*']
   pull_request:
   workflow_dispatch:
+    inputs:
+      release:
+        description: 'Publish a release with this version tag (e.g. v1.0.0); leave empty for a normal build'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -33,16 +38,17 @@ jobs:
           if-no-files-found: error
 
       - name: SHA-256 checksum
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.release != ''
         shell: pwsh
         run: (Get-FileHash build/Release/OscreenSaver.exe -Algorithm SHA256).Hash | Out-File -Encoding ascii build/Release/OscreenSaver.exe.sha256
 
       - name: Publish release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: startsWith(github.ref, 'refs/tags/v') || inputs.release != ''
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          $tag = if ("${{ inputs.release }}") { "${{ inputs.release }}" } else { "${{ github.ref_name }}" }
           $hash = Get-Content build/Release/OscreenSaver.exe.sha256
-          $notes = "OscreenSaver ${{ github.ref_name }} - screenshot tool for Windows 10/11 (x64). Author: Oleksii Tatarinov.`n`nDownload OscreenSaver.exe and run it; no installation is needed.`n`nSHA-256 of OscreenSaver.exe: $hash"
-          gh release create "${{ github.ref_name }}" build/Release/OscreenSaver.exe build/Release/OscreenSaver.exe.sha256 --title "OscreenSaver ${{ github.ref_name }}" --notes "$notes"
+          $notes = "OscreenSaver $tag - screenshot tool for Windows 10/11 (x64). Author: Oleksii Tatarinov.`n`nDownload OscreenSaver.exe and run it; no installation is needed.`n`nSHA-256 of OscreenSaver.exe: $hash"
+          gh release create "$tag" build/Release/OscreenSaver.exe build/Release/OscreenSaver.exe.sha256 --target "${{ github.sha }}" --title "OscreenSaver $tag" --notes "$notes"
