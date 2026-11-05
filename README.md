@@ -1,6 +1,6 @@
 # OscreenSaver
 
-**Author: Alexey Tatarinov**
+**Author: Oleksii Tatarinov**
 
 OscreenSaver is a lightweight screenshot tool for Windows 10 and 11 (x64). Press **PrintScreen**, select an
 area, mark it up and save it in a few seconds. The program runs quietly in the background, uses almost no
@@ -120,12 +120,12 @@ Details are in [`res/sounds/CREDITS.md`](res/sounds/CREDITS.md).
 
 ## Author
 
-**Alexey Tatarinov** — idea, design and requirements.
+**Oleksii Tatarinov** — idea, design and requirements.
 
 ## License
 
 OscreenSaver is released under the [MIT License](LICENSE). You may use, copy, change and share it freely,
 as long as the copyright notice with the author's name is kept.
 
-Copyright © 2026 Alexey Tatarinov.
+Copyright © 2026 Oleksii Tatarinov.
 The two recorded sounds keep their own licences (see Credits).

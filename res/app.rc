@@ -23,11 +23,11 @@ BEGIN
     BEGIN
         BLOCK "040904b0"
         BEGIN
-            VALUE "CompanyName", "Alexey Tatarinov"
+            VALUE "CompanyName", "Oleksii Tatarinov"
             VALUE "FileDescription", "OscreenSaver - screenshot tool"
             VALUE "FileVersion", "0.1.0"
             VALUE "InternalName", "OscreenSaver"
-            VALUE "LegalCopyright", "Copyright (C) 2026 Alexey Tatarinov. MIT License."
+            VALUE "LegalCopyright", "Copyright (C) 2026 Oleksii Tatarinov. MIT License."
             VALUE "OriginalFilename", "OscreenSaver.exe"
             VALUE "ProductName", "OscreenSaver"
             VALUE "ProductVersion", "0.1.0"

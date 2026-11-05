@@ -1,5 +1,5 @@
 // OscreenSaver - screenshot tool for Windows.
-// Copyright (C) 2026 Alexey Tatarinov. All rights reserved.
+// Copyright (C) 2026 Oleksii Tatarinov. MIT License.
 //
 // Runs in the background with no visible window. Pressing PrintScreen freezes the monitor
 // under the cursor. While idle the program waits on its message queue and uses no CPU.
