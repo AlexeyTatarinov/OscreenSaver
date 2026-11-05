@@ -118,6 +118,8 @@ const wchar_t* const kStrings[][3] = {
     /* SoundChime */ {L"Short chime", L"Короткий сигнал", L"Короткий сигнал"},
     /* SoundFile */ {L"Own file…", L"Свой файл…", L"Власний файл…"},
     /* SoundFilter */ {L"Sound (WAV)", L"Звук (WAV)", L"Звук (WAV)"},
+    /* SoundGlass */ {L"Breaking glass", L"Разбитое стекло", L"Розбите скло"},
+    /* SoundBirds */ {L"Birds flying off", L"Взлетающие птицы", L"Птахи, що злітають"},
 };
 
 }  // namespace

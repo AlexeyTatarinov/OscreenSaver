@@ -37,6 +37,19 @@ enum Id : int {
 
 const int kQualities[] = {100, 95, 90, 80, 70};
 
+// Order of the sounds in the list; the own file is always last.
+const SaveSound kSoundOrder[] = {SaveSound::Shutter, SaveSound::Click, SaveSound::Chime,
+                                 SaveSound::Glass,   SaveSound::Birds, SaveSound::File};
+constexpr int kSoundCount = static_cast<int>(sizeof(kSoundOrder) / sizeof(kSoundOrder[0]));
+
+SaveSound SoundAt(int row) { return row >= 0 && row < kSoundCount ? kSoundOrder[row] : SaveSound::Shutter; }
+int RowOf(int sound) {
+    for (int i = 0; i < kSoundCount; ++i) {
+        if (static_cast<int>(kSoundOrder[i]) == sound) return i;
+    }
+    return 0;
+}
+
 // Popular screenshot shortcuts (as in other screenshot tools); the last line is a custom one.
 struct Preset {
     UINT vk;
@@ -91,7 +104,7 @@ void UpdatePreview() {
 }
 
 void UpdateSoundFile() {
-    const bool own = g_soundSel == static_cast<int>(SaveSound::File);
+    const bool own = SoundAt(g_soundSel) == SaveSound::File;
     SetDlgItemTextW(g_window, IdSoundFile, own ? g_soundFile.c_str() : L"");
 }
 
@@ -125,13 +138,13 @@ bool PickSoundFile() {
 
 void SoundChanged() {
     const int sel = static_cast<int>(SendDlgItemMessageW(g_window, IdSound, CB_GETCURSEL, 0, 0));
-    if (sel == static_cast<int>(SaveSound::File) && !PickSoundFile() && g_soundFile.empty()) {
+    if (SoundAt(sel) == SaveSound::File && !PickSoundFile() && g_soundFile.empty()) {
         SendDlgItemMessageW(g_window, IdSound, CB_SETCURSEL, g_soundSel, 0);  // nothing chosen: keep the old one
         return;
     }
     g_soundSel = sel;
     UpdateSoundFile();
-    PlaySaveSound(static_cast<SaveSound>(g_soundSel), g_soundFile);
+    PlaySaveSound(SoundAt(g_soundSel), g_soundFile);
 }
 
 void Build(HWND w) {
@@ -198,12 +211,13 @@ void Build(HWND w) {
     Add(w, L"BUTTON", T(Str::MenuAutostart), BS_AUTOCHECKBOX | WS_TABSTOP, inner, 502, width - 24, 22, IdAutostart);
     CheckDlgButton(w, IdAutostart, IsAutostartEnabled() ? BST_CHECKED : BST_UNCHECKED);
     Add(w, L"STATIC", T(Str::SetSound), SS_LEFT, inner, 534, 124, 20, 0);
-    HWND sound = Add(w, WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_TABSTOP, field, 530, fieldW - 40, 160, IdSound);
-    for (Str s : {Str::SoundShutter, Str::SoundClick, Str::SoundChime, Str::SoundFile}) {
+    HWND sound = Add(w, WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_TABSTOP, field, 530, fieldW - 40, 200, IdSound);
+    for (Str s : {Str::SoundShutter, Str::SoundClick, Str::SoundChime, Str::SoundGlass, Str::SoundBirds,
+                  Str::SoundFile}) {
         SendMessageW(sound, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(T(s)));
     }
     g_soundFile = c.soundFile;
-    g_soundSel = (c.sound >= 0 && c.sound < static_cast<int>(SaveSound::Count)) ? c.sound : 0;
+    g_soundSel = RowOf(c.sound);  // g_soundSel is a row of the list
     SendMessageW(sound, CB_SETCURSEL, g_soundSel, 0);
     Add(w, L"BUTTON", L"\u25B6", BS_PUSHBUTTON | WS_TABSTOP, field + fieldW - 34, 529, 34, 26, IdSoundPlay);
     Add(w, L"STATIC", L"", SS_LEFT | SS_PATHELLIPSIS, field, 558, fieldW, 18, IdSoundFile);
@@ -255,7 +269,7 @@ void Apply() {
     const std::wstring name = ItemText(IdName);
     if (!name.empty()) c.nameTemplate = name;
     c.clipboardOnly = Checked(IdClipboardOnly);
-    c.sound = g_soundSel;
+    c.sound = static_cast<int>(SoundAt(g_soundSel));
     c.soundFile = g_soundFile;
     SaveConfig();
     SetAutostart(Checked(IdAutostart));
@@ -338,7 +352,7 @@ LRESULT CALLBACK Proc(HWND w, UINT msg, WPARAM wp, LPARAM lp) {
                     if (HIWORD(wp) == CBN_SELCHANGE) SoundChanged();
                     return 0;
                 case IdSoundPlay:
-                    PlaySaveSound(static_cast<SaveSound>(g_soundSel), g_soundFile);
+                    PlaySaveSound(SoundAt(g_soundSel), g_soundFile);
                     return 0;
                 case IdName:
                     if (HIWORD(wp) == EN_CHANGE) UpdatePreview();

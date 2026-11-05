@@ -109,6 +109,14 @@ const std::vector<uint8_t>& Built(SaveSound sound) {
 
 }  // namespace
 
+// Recorded sounds kept inside the program (res/app.rc).
+const void* FromResource(int id) {
+    HMODULE self = GetModuleHandleW(nullptr);
+    HRSRC found = FindResourceW(self, MAKEINTRESOURCEW(id), MAKEINTRESOURCEW(10));  // RT_RCDATA
+    HGLOBAL data = found ? LoadResource(self, found) : nullptr;
+    return data ? LockResource(data) : nullptr;
+}
+
 void PlaySaveSound(SaveSound sound, const std::wstring& file) {
     if (sound == SaveSound::File) {
         if (!file.empty() &&
@@ -116,6 +124,13 @@ void PlaySaveSound(SaveSound sound, const std::wstring& file) {
             return;
         }
         sound = SaveSound::Shutter;  // the file is missing or cannot be played
+    }
+    if (sound == SaveSound::Glass || sound == SaveSound::Birds) {
+        if (const void* wave = FromResource(sound == SaveSound::Glass ? 201 : 202)) {
+            PlaySoundW(static_cast<LPCWSTR>(wave), nullptr, SND_MEMORY | SND_ASYNC | SND_NODEFAULT);
+            return;
+        }
+        sound = SaveSound::Shutter;
     }
     PlaySoundW(reinterpret_cast<LPCWSTR>(Built(sound).data()), nullptr, SND_MEMORY | SND_ASYNC | SND_NODEFAULT);
 }

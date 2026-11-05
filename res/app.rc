@@ -5,6 +5,10 @@
 // Program icon: OTS in a dash-dot frame with a mouse cursor (drawn by res/make_icon.py).
 101 ICON "app.ico"
 
+// Sounds after saving (see res/sounds/CREDITS.md for their authors and licences).
+201 RCDATA "sounds/glass.wav"
+202 RCDATA "sounds/birds.wav"
+
 // Authorship information. A cryptographic code signature is planned for a later stage.
 VS_VERSION_INFO VERSIONINFO
  FILEVERSION 0,1,0,0
