@@ -158,6 +158,11 @@ void IconArrow(G::Graphics& g, const Box& b, const G::Color& fg, float s) {
     g.DrawLine(pen.get(), b.X(13.5f), b.Y(2.5f), b.X(13.5f), b.Y(8.5f));
 }
 
+void IconLine(G::Graphics& g, const Box& b, const G::Color& fg, float s) {
+    auto pen = LinePen(fg, s);
+    g.DrawLine(pen.get(), b.X(2.5f), b.Y(13.5f), b.X(13.5f), b.Y(2.5f));
+}
+
 void IconEllipse(G::Graphics& g, const Box& b, const G::Color& fg, float s) {
     auto pen = LinePen(fg, s);
     g.DrawEllipse(pen.get(), b.X(1.5f), b.Y(3.5f), b.size * 13 / 16, b.size * 9 / 16);
@@ -512,6 +517,7 @@ void Draw(HDC dc, const RECT& panel, const State& st, float s) {
         switch (id) {
             case static_cast<int>(Tool::Select): IconSelect(g, b, color, s); break;
             case static_cast<int>(Tool::Arrow): IconArrow(g, b, color, s); break;
+            case static_cast<int>(Tool::Line): IconLine(g, b, color, s); break;
             case static_cast<int>(Tool::Ellipse): IconEllipse(g, b, color, s); break;
             case static_cast<int>(Tool::Blur): IconBlur(g, b, color, s); break;
             case kEraseWhole: IconEraseWhole(g, b, color, s); break;
@@ -544,6 +550,7 @@ const wchar_t* Tip(int id) {
         case static_cast<int>(Tool::Marker): return T(Str::TipMarker);
         case static_cast<int>(Tool::Brush): return T(Str::TipBrush);
         case static_cast<int>(Tool::Arrow): return T(Str::TipArrow);
+        case static_cast<int>(Tool::Line): return T(Str::TipLine);
         case static_cast<int>(Tool::Rect): return T(Str::TipRect);
         case static_cast<int>(Tool::Ellipse): return T(Str::TipEllipse);
         case static_cast<int>(Tool::Blur): return T(Str::TipBlur);

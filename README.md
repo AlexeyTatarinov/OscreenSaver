@@ -11,7 +11,7 @@ Interface languages: **English** (default), **Ukrainian**, **Spanish** — chose
 ## What it is for
 
 - Quickly capturing part of the screen to send in a chat, an e-mail or a bug report.
-- Pointing at things: arrows, frames, numbered markers, text notes.
+- Pointing at things: arrows, lines, frames, numbered markers, text notes.
 - Hiding private data (passwords, names, account numbers) with blur before sharing.
 - Comparing several parts of the screen in one picture.
 - Capturing a whole long web page or document that does not fit on the screen.
@@ -42,7 +42,8 @@ A notice appears after saving; click it to open the folder with the file.
   finishes.
 
 **Drawing tools**
-- Pencil, marker (semi-transparent), thick brush, arrow, rectangle, ellipse.
+- Pencil, marker (semi-transparent), thick brush, straight line, arrow, rectangle, ellipse.
+  Hold **Shift** while drawing a line or an arrow to keep it horizontal, vertical or at 45°.
 - Text with mixed styles in one line: bold, italic, strikethrough, colour, size and any Windows font;
   a text cursor for editing.
 - Blur for hiding private data.

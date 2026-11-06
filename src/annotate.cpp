@@ -314,6 +314,7 @@ void DrawOne(G::Graphics& g, const Shape& s, const TextStyle* caretStyle, COLORR
             DrawPath(g, s.points, width, ToColor(s.color, 110));  // see-through highlighter
             break;
         case Tool::Arrow:
+        case Tool::Line:
         case Tool::Rect:
         case Tool::Ellipse: {
             if (s.points.size() < 2) break;
@@ -325,6 +326,10 @@ void DrawOne(G::Graphics& g, const Shape& s, const TextStyle* caretStyle, COLORR
                 G::AdjustableArrowCap cap(head, head * 0.9f, TRUE);
                 pen.SetCustomEndCap(&cap);
                 pen.SetStartCap(G::LineCapRound);
+                g.DrawLine(&pen, a.x, a.y, b.x, b.y);
+            } else if (s.tool == Tool::Line) {
+                pen.SetStartCap(G::LineCapRound);
+                pen.SetEndCap(G::LineCapRound);
                 g.DrawLine(&pen, a.x, a.y, b.x, b.y);
             } else {
                 const float l = std::min(a.x, b.x), t = std::min(a.y, b.y);
@@ -565,7 +570,7 @@ float TextPresetPx(int size, float scale) {
 }
 
 bool IsTwoPointTool(Tool t) {
-    return t == Tool::Arrow || t == Tool::Rect || t == Tool::Ellipse || t == Tool::Blur;
+    return t == Tool::Arrow || t == Tool::Line || t == Tool::Rect || t == Tool::Ellipse || t == Tool::Blur;
 }
 
 float StepRadius(int size, float scale) {

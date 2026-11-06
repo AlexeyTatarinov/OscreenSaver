@@ -290,6 +290,9 @@ const wchar_t* const kStrings[][3] = {
     /* SetHotkeyPress */ {L"Press the keys, e.g. Ctrl+Shift+S",
         L"Натисніть клавіші, наприклад Ctrl+Shift+S",
         L"Pulse las teclas, p. ej. Ctrl+Shift+S"},
+    /* TipLine */ {L"Straight line (Shift — horizontal, vertical or 45°)",
+        L"Пряма лінія (Shift — горизонтально, вертикально або під 45°)",
+        L"Línea recta (Mayús — horizontal, vertical o a 45°)"},
 };
 
 static_assert(sizeof(kStrings) / sizeof(kStrings[0]) == static_cast<size_t>(Str::Count),

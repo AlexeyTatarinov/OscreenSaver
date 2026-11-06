@@ -8,7 +8,7 @@
 
 // Drawing tools. The order matches the buttons on the panel.
 // Step = numbered marker 1, 2, 3...; Picker = eyedropper (copies the colour under the cursor).
-enum class Tool { Area, Select, Pencil, Marker, Brush, Arrow, Rect, Ellipse, Blur, Step, Text, Eraser, Picker, Count };
+enum class Tool { Area, Select, Pencil, Marker, Brush, Arrow, Line, Rect, Ellipse, Blur, Step, Text, Eraser, Picker, Count };
 
 // Fixed colours on the panel: green, red, white, black. Any other colour is picked in the colour window.
 constexpr int kColorCount = 4;

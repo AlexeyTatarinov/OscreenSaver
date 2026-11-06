@@ -869,6 +869,16 @@ void ContinueStroke(Overlay& o, POINT p) {
     if (IsTwoPointTool(o.current.tool)) {
         const RECT before = ShapeBounds(o.current, o.scale);
         pts[1] = ToPt(p);
+        // Shift: a line or an arrow goes exactly horizontal, vertical or at 45 degrees.
+        const Tool t = o.current.tool;
+        if ((t == Tool::Line || t == Tool::Arrow) && (GetKeyState(VK_SHIFT) & 0x8000)) {
+            const float dx = pts[1].x - pts[0].x, dy = pts[1].y - pts[0].y;
+            const double len = std::hypot(dx, dy);
+            const double step = 3.14159265358979 / 4;
+            const double angle = std::round(std::atan2(dy, dx) / step) * step;
+            pts[1].x = pts[0].x + static_cast<float>(len * std::cos(angle));
+            pts[1].y = pts[0].y + static_cast<float>(len * std::sin(angle));
+        }
         const RECT dirty = Union(before, ShapeBounds(o.current, o.scale));
         InvalidateRect(o.hwnd, &dirty, FALSE);
         return;
