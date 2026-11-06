@@ -61,21 +61,88 @@ A notice appears after saving; click it to open the folder with the file.
 - A sound after saving: camera shutter, soft click, chime, breaking glass, birds flying off,
   or your own WAV file.
 
-## Keyboard shortcuts
+## Keyboard shortcuts and mouse actions
 
-| Key | Action |
+All shortcuts below are the defaults. Only the screenshot key can be changed (Settings → Hotkey).
+
+**Starting a screenshot**
+
+| Keys / mouse | Action |
 |---|---|
-| PrintScreen | Take a screenshot (can be changed in the settings) |
-| Enter / Ctrl+S | Save and copy |
-| Ctrl+C | Copy to the clipboard only |
-| Esc | Close without saving |
-| Tab | Switch between area selection and the last drawing tool |
-| Ctrl + drag | Add one more area |
+| PrintScreen | Freeze the screen and start a screenshot |
+| Double-click the tray icon | Start a screenshot |
+| Right-click the tray icon | Menu: take a screenshot, Settings, Exit |
+| Click the "Saved" notice | Open the folder with the saved file |
+
+**Choosing the area** (frozen screen)
+
+| Keys / mouse | Action |
+|---|---|
+| Drag with the left mouse button | Select an area |
+| Click on a window | Select exactly that window |
+| Click on an empty place | Select the whole screen |
 | Ctrl+A | Select the whole screen |
-| Ctrl+Z / Ctrl+Y | Undo / redo |
-| Delete | Delete the selected object |
-| Ctrl+B / Ctrl+I | Bold / italic text |
-| Enter / Shift+Enter (in text) | Finish the text / new line |
+| Drag the frame or its handles | Move or resize the selected area |
+| Ctrl + drag | Add one more area (up to 4); they are joined side by side into one picture |
+| Click an added area | Make it active to move or resize it |
+| Right-click | Clear the selection and choose again |
+| Right-click a monitor | Choose this monitor (when the program asks which monitor to capture) |
+| Tab | Switch between area selection and the last drawing tool |
+
+**Finishing**
+
+| Keys / mouse | Action |
+|---|---|
+| Enter | Save to a file and copy to the clipboard (only copy, if "clipboard only" is on in the settings) |
+| Ctrl+S | Save to a file and copy to the clipboard |
+| Double-click inside the area | Save to a file and copy to the clipboard |
+| Ctrl+C | Copy to the clipboard only, without saving a file |
+| Esc | Close without saving |
+
+**Drawing**
+
+| Keys / mouse | Action |
+|---|---|
+| Ctrl+Z | Undo |
+| Ctrl+Y or Ctrl+Shift+Z | Redo |
+| Shift while drawing a line or an arrow | Keep it horizontal, vertical or at 45° |
+| Delete | Delete the object picked with the selection tool |
+
+**Typing text** (Text tool)
+
+| Keys | Action |
+|---|---|
+| Enter | Finish the text |
+| Shift+Enter | New line |
+| Esc | Cancel the text being typed |
+| Ctrl+B / Ctrl+I | Bold / italic for the letters typed next |
+| ← → ↑ ↓, Home, End | Move the text cursor |
+| Backspace / Delete | Delete the letter before / after the cursor |
+| Ctrl+Z | Undo |
+
+**Long screenshot with scrolling**
+
+| Keys / mouse | Action |
+|---|---|
+| Mouse wheel down | Scroll the window yourself, if it does not scroll automatically |
+| Enter or Esc | Finish and keep what has been captured |
+
+**Picture pinned on top of the screen**
+
+| Keys / mouse | Action |
+|---|---|
+| Drag with the mouse | Move the picture |
+| Mouse wheel | Zoom in / out |
+| Ctrl+C | Copy the picture |
+| Right-click | Menu: copy, save to file, actual size, close |
+| Double-click or Esc | Close the picture |
+
+**Settings window — own shortcut field**
+
+| Keys | Action |
+|---|---|
+| Any combination, e.g. Ctrl+Shift+S | Becomes the new screenshot key |
+| Backspace / Delete | Clear the field |
 
 ## Settings
 
